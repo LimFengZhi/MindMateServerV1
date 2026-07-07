@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Multi-Agent Test{% endblock %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}" />
+{% endblock %}
+
+{% block body %}
+  <div class="admin-wrap">
+    <header class="topbar">
+      <a class="btn btn-ghost" href="/admin">← Dashboard</a>
+      <strong class="topbar-title">Testing — Multi-Agent System</strong>
+      <div class="admin-topbar-right">
+        <span id="adminEmail" class="muted"></span>
+        <button class="btn btn-ghost" onclick="logout()"><span>⎋</span> Logout</button>
+      </div>
+    </header>
+
+    <div class="test-layout">
+      <aside class="test-sidebar">
+        <button class="btn btn-primary btn-block" onclick="startTestChat()">＋ New chat</button>
+        <div class="side-label">My chats</div>
+        <div id="testSessionList" class="session-list"><p class="placeholder">Loading…</p></div>
+      </aside>
+
+      <div class="test-main">
+        <div class="test-head">
+          <strong id="testSessionTitle" class="topbar-title">Multi-agent test</strong>
+          <div id="renameEditor" class="rename-editor hidden">
+            <input id="renameInput" maxlength="80"
+                   onkeydown="if(event.key==='Enter') saveRename(); if(event.key==='Escape') cancelRename();" />
+            <button class="btn btn-primary" onclick="saveRename()">Save</button>
+            <button class="btn btn-ghost" onclick="cancelRename()">Cancel</button>
+            <span id="renameMsg" class="text-danger"></span>
+          </div>
+          <div class="test-head-actions">
+            <button class="btn" id="renameTestBtn" disabled onclick="renameTestChat()">Rename</button>
+            <button class="btn" id="exportTestBtn" disabled onclick="exportTestChat()">Export JSON</button>
+          </div>
+        </div>
+
+        <div id="testChat">
+          <p class="placeholder">Start a new test chat, or open one from the history.
+            Messages run through the real pipeline (diagnostic → crisis routing →
+            summariser → chatbot) under your own account.</p>
+        </div>
+
+        <footer class="test-composer">
+          <textarea id="testMessage" rows="1" placeholder="Type a test message…" disabled
+            onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendTestMessage();}"></textarea>
+          <button class="btn btn-primary" id="testSendBtn" disabled onclick="sendTestMessage()">Send</button>
+        </footer>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin/review_helpers.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin/test_multi.js') }}"></script>
+{% endblock %}

@@ -18,32 +18,84 @@
       </div>
     </header>
 
+    <nav class="admin-nav">
+      <button class="chip active" id="nav-overview" onclick="switchView('overview')">📊 Overview</button>
+      <button class="chip" id="nav-emotions" onclick="switchView('emotions')">💭 Emotion Analysis</button>
+      <button class="chip" id="nav-sessions" onclick="switchView('sessions')">💬 User Sessions</button>
+      <button class="chip" id="nav-testing" onclick="switchView('testing')">🧪 Testing</button>
+      <button class="chip hidden" id="nav-staff" onclick="switchView('staff')">👥 Staff</button>
+      <button class="chip" disabled title="Coming soon">🗂 Dataset (soon)</button>
+    </nav>
+
     <main class="content scroll">
       <div class="admin-body">
-        <h2>Overview</h2>
-        <div id="adminStats"><p class="placeholder">Loading…</p></div>
 
-        <!-- Admin-only: create staff logins by email (shown by admin.js) -->
-        <section id="staffSection" class="section-card hidden">
-          <h3>Staff accounts</h3>
-          <p class="muted">Create a staff login: enter their email and a temporary
-            password, then share it with them. If the email already has a MindMate
-            account, it is promoted to staff instead.</p>
-          <div class="staff-form">
-            <input id="staffEmail" type="email" autocomplete="off"
-                   placeholder="staff@example.com" />
-            <input id="staffPassword" type="password" autocomplete="new-password"
-                   placeholder="Temporary password (min 6)" />
-            <button class="btn btn-primary" onclick="createStaff()">Create staff</button>
-          </div>
-          <p id="staffMsg" class="auth-msg"></p>
-          <div id="staffList"><p class="placeholder">Loading…</p></div>
+        <section id="view-overview">
+          <h2>Overview</h2>
+          <div id="adminStats"><p class="placeholder">Loading…</p></div>
         </section>
+
+        <section id="view-emotions" class="hidden">
+          <h2>Emotion Analysis — all users</h2>
+          <div id="emotionBody"><p class="placeholder">Loading…</p></div>
+        </section>
+
+        <section id="view-sessions" class="hidden">
+          <h2>User Sessions</h2>
+          <p class="muted">Pick a user, then one of their chats, to review it — rate
+            replies, leave feedback, or export it as JSON. Already-reviewed replies
+            are shown with their rating and feedback.</p>
+          <div id="sessionsBody"><p class="placeholder">Loading…</p></div>
+        </section>
+
+        <section id="view-testing" class="hidden">
+          <h2>Testing</h2>
+          <p class="muted">Choose what you want to test — it opens on its own page.</p>
+
+          <div class="test-picker">
+            <div class="test-card" onclick="location.href='/admin/testing/multi-agent'">
+              <div class="rc-icon tint-calm">🤖</div>
+              <h3>Multi-Agent System</h3>
+              <p>Test the full pipeline end-to-end — diagnostic → crisis routing →
+                summariser → chatbot — rate every reply, and export the run as JSON.</p>
+            </div>
+            <div class="test-card disabled">
+              <div class="rc-icon tint-love">💬</div>
+              <h3>Chatbot only</h3>
+              <p>Coming soon.</p>
+            </div>
+            <div class="test-card disabled">
+              <div class="rc-icon tint-stress">🏷️</div>
+              <h3>Emotion Classifier</h3>
+              <p>Coming soon.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-staff" class="hidden">
+          <h2>Staff accounts</h2>
+          <section class="section-card">
+            <p class="muted">Create a staff login: enter their email and a temporary
+              password, then share it with them. If the email already has a MindMate
+              account, it is promoted to staff instead.</p>
+            <div class="staff-form">
+              <input id="staffEmail" type="email" autocomplete="off"
+                     placeholder="staff@example.com" />
+              <input id="staffPassword" type="password" autocomplete="new-password"
+                     placeholder="Temporary password (min 6)" />
+              <button class="btn btn-primary" onclick="createStaff()">Create staff</button>
+            </div>
+            <p id="staffMsg" class="auth-msg"></p>
+            <div id="staffList"><p class="placeholder">Loading…</p></div>
+          </section>
+        </section>
+
       </div>
     </main>
   </div>
 {% endblock %}
 
 {% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin/review_helpers.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin/admin.js') }}"></script>
 {% endblock %}

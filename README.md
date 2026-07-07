@@ -105,7 +105,15 @@ Check what's loaded at any time: <http://localhost:5000/health>.
 
 Every user gets the `user` role automatically (via the `profiles` table).
 
-- **staff** — can open the staff dashboard at `/admin` (usage stats).
+- **staff** — the full backoffice at `/admin`:
+  - **Overview** — usage stats (users, sessions, messages, escalations, tests taken)
+  - **Emotion Analysis** — emotion distribution + escalations across all users
+  - **User Sessions** — pick a user → pick a chat → review the transcript with
+    per-reply diagnostics; **rate each bot reply (1–5 ★), leave feedback**, and
+    **export the session as JSON**
+  - **Testing** — a multi-agent test bench (`/admin/testing/multi-agent`) that
+    chats through the real pipeline on the staff member's own account, with the
+    same rating/feedback controls and JSON export
 - **admin** — everything staff can, plus **create/remove staff accounts by
   email** from the dashboard.
 
@@ -183,11 +191,12 @@ dashboard (Table editor → `prompts` → edit the `content` of `composed` /
 `summarise`); changes take effect within ~15 seconds, no restart needed. If the
 table is empty or unreachable, the app falls back to the bundled `.txt` files.
 
-### Message feedback (schema only)
-The `messages` table has `rating` (1–5), `feedback` (text), and `feedback_by`
-(the userID who gave it) columns, plus `feedback_at`. These are **not used by
-this app yet** — they're in place for a future feedback feature. A
-`repo.set_message_feedback(...)` helper exists for that future use.
+### Message feedback (staff review)
+The `messages` table's `rating` (1–5), `feedback` (text), `feedback_by`, and
+`feedback_at` columns are written by the **staff site's review tools** (User
+Sessions and the Testing bench): staff rate bot replies and leave feedback via
+`POST /api/admin/messages/{id}/feedback`, and session exports include them —
+a ready-made quality dataset for future fine-tuning.
 
 > Re-running `schema.sql` after an update is safe and idempotent — it adds new
 > tables/columns (resources columns, self-tests, staff role) without touching

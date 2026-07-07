@@ -157,21 +157,27 @@ def add_message(user_id, session_id, question, reply, emotion=None,
 def set_message_feedback(message_id, rating=None, feedback=None, feedback_by=None):
     """Attach feedback (rating 1-5 + text + the user who gave it) to a message.
 
-    Not wired into a route in this app yet — provided so a future app/feature can
-    record feedback against a response. `feedback_by` is the userID giving it.
+    Used by the staff review tools (/api/admin). Only the provided fields are
+    written, so a rating-only save never wipes existing feedback text (and
+    vice versa). `feedback_by` is the userID giving it.
     """
     if rating is not None and not (1 <= int(rating) <= 5):
         raise ValueError("rating must be between 1 and 5")
     update = {
-        "rating": rating,
-        "feedback": feedback,
         "feedback_by": feedback_by,
         "feedback_at": datetime.now(timezone.utc).isoformat(),
     }
-    res = (get_sb().table("messages")
-           .update(update)
-           .eq("id", message_id)
-           .execute())
+    if rating is not None:
+        update["rating"] = rating
+    if feedback is not None:
+        update["feedback"] = feedback
+    try:
+        res = (get_sb().table("messages")
+               .update(update)
+               .eq("id", message_id)
+               .execute())
+    except APIError as e:
+        return _none_if_bad_uuid(e)  # malformed message id -> not found
     return res.data[0] if res.data else None
 
 

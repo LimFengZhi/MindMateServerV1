@@ -385,8 +385,11 @@ Future<Map<String, dynamic>> sendVoice(String sessionId, List<int> audioBytes) a
 - **Rate limits:** `login`/`register` 10/min, `chat` 20/min, `voice` 10/min —
   handle `429` gracefully.
 - **Roles:** `role` is `"user"`, `"staff"`, or `"admin"`. Staff/admin accounts
-  get the web admin site at `/admin` (backed by `/api/admin/*`) — a web-only
-  surface; the Flutter client only needs `role` to know the user type.
-  **Admins create staff accounts by email** on the dashboard
-  (`POST /api/admin/staff`, admin-only). Only the first admin is made via SQL:
+  get the web admin site at `/admin` — a **web-only** surface; the Flutter
+  client only needs `role` to know the user type. Its API (all under
+  `/api/admin/*`, staff-guarded): `stats`, `emotions`, `sessions`,
+  `sessions/{id}`, `sessions/{id}/export` (JSON download),
+  `messages/{id}/feedback` (staff rating 1–5 + feedback on a bot reply), and
+  the admin-only `staff` account management. **Admins create staff accounts by
+  email** on the dashboard. Only the first admin is made via SQL:
   `update public.profiles set role = 'admin' where email = '…';`

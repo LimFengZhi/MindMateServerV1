@@ -22,8 +22,8 @@ makes admin changes impossible to leak into user-facing behavior.
 | `app/admin/routes.py` | Admin pages (`/admin/...`) and JSON API (`/api/admin/...`). **Every** API route carries `@staff_required` or `@admin_required`. |
 | `app/admin/service.py` | Admin-side orchestration (e.g. creating staff accounts via Supabase's auth admin API). |
 | `app/db/admin_repo.py` | **All** admin database queries. Never put them in `repo.py`, and never call `repo.py`'s user-scoped functions with another user's id. |
-| `app/templates/admin/` | Admin Jinja pages. Extend `base.html` directly (not `app_base.html` — that's the user shell with the user sidebar). |
-| `app/static/js/admin/` | Admin page scripts. May use the shared helpers from `common.js` (`api()`, `escapeHTML`, `$`, placeholders). |
+| `app/templates/admin/` | Admin Jinja pages (dashboard, staff login, test benches). Extend `base.html` directly (not `app_base.html` — that's the user shell with the user sidebar). |
+| `app/static/js/admin/` | Admin page scripts. May use the shared helpers from `common.js` (`api()`, `escapeHTML`, `$`, placeholders). Staff-specific shared code (role guard, feedback controls, export) lives in `review_helpers.js` — load it before the page's own script. |
 | `app/static/css/admin.css` | Admin-only styles, layered **on top of** `style.css`. New admin styles go here, not in `style.css`. |
 
 ### Shared files admin work may touch — but only in the marked way
@@ -43,7 +43,7 @@ makes admin changes impossible to leak into user-facing behavior.
 | Path | Why it's off-limits |
 |---|---|
 | `app/auth/routes.py`, `app/sessions/`, `app/chat/routes.py`, `app/resources/routes.py`, `app/resources/self_test/routes.py`, `app/agreements/` | The public API contract in [API.md](API.md) — the Flutter client depends on these shapes and status codes. |
-| `app/db/repo.py` | User-scoped data access. Every query filters by `user_id`; admin queries live in `admin_repo.py` so an admin feature can never accidentally widen a user query. |
+| `app/db/repo.py` | User-scoped data access. Every query filters by `user_id`; admin queries live in `admin_repo.py` so an admin feature can never accidentally widen a user query. (Sanctioned exceptions admin routes may call: the id-scoped helpers `get_profile` and `set_message_feedback` — never the `user_id`-filtered functions.) |
 | `app/chat/orchestrator.py`, `app/agents/`, `app/ml/`, `app/prompt_builder/` | The AI pipeline and its safety layers (crisis regex, stub fallbacks). Admin edits prompts **through the `prompts` DB table**, which the loader picks up within ~15 s — that's the designed integration point; no code change needed. |
 | `app/static/js/common.js`, `chat.js`, `login.js`*, `analysis.js`, `resources.js` | User UI. (*except the staff-entrance redirect note in §1.) |
 | `app/static/css/style.css` | Shared base theme. Admin pages *consume* its classes (`.btn`, `.cards`, `.topbar`, `.auth-card`…); admin-specific rules go in `admin.css`. |
@@ -61,8 +61,10 @@ makes admin changes impossible to leak into user-facing behavior.
    button is never the access control.
 2. **Pages are shells.** The `/admin` HTML renders for anyone; all data comes
    from guarded APIs. Client-side role checks only handle redirect UX.
-3. **Privacy by default.** Admin endpoints return **aggregates** (counts,
-   bands). Never expose message content or individual test answers.
+3. **Privacy by default.** Dashboard endpoints return **aggregates** (counts,
+   bands). The session-review tools expose transcripts to staff **by design**
+   (counselling review + reply feedback) — but individual self-test answers
+   stay private, and no endpoint returns more than its screen needs.
 4. **Errors** always via `app/http_utils.json_error` → `{ "error": "…" }`.
 5. **Roles:** `user` < `staff` < `admin`. Admins create/remove staff from the
    dashboard; the **first admin** is promoted by SQL (see README §4). Staff
@@ -71,6 +73,11 @@ makes admin changes impossible to leak into user-facing behavior.
    the user pages (the CSP allows inline handlers, so this is load-bearing).
 7. **New tables** go into `schema.sql` as an idempotent block **with RLS
    policies**, and get a matching accessor in `admin_repo.py`.
+8. **The test bench calls user-side endpoints on purpose.** Test chats are real
+   sessions on the staff member's *own* account (`POST /sessions`, `POST /chat`
+   with their own token), so the pipeline is exercised exactly as users
+   experience it — don't replace that with a parallel admin chat endpoint.
+   Only the review/export extras go through `/api/admin/*`.
 
 ## 4. User-side rules (the mirror image)
 
