@@ -1,0 +1,20 @@
+{% extends "app_base.html" %}
+{% set active_page = "resources" %}
+
+{% block title %}Resources{% endblock %}
+
+{% block topbar_title %}
+  <strong class="topbar-title">Resources</strong>
+{% endblock %}
+
+{% block main %}
+  <main class="content scroll">
+    <div class="resources-wrap" id="resourcesRoot">
+      <p class="placeholder">Loading resources…</p>
+    </div>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/resources.js') }}"></script>
+{% endblock %}

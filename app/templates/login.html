@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block body %}
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="brand">
+        <img class="brand-logo" src="{{ url_for('assets', filename='images/logo.png') }}" alt="MindMate" />
+        <h1>MindMate</h1>
+        <p class="brand-tagline">Multi-Agent mental-health support companion</p>
+      </div>
+
+      <div class="tabs">
+        <button id="tabLogin" class="tab active" onclick="switchTab('login')">Login</button>
+        <button id="tabRegister" class="tab" onclick="switchTab('register')">Register</button>
+      </div>
+
+      <label class="field">
+        <span>Email</span>
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Password"
+          onkeydown="if(event.key==='Enter') submitAuth()" />
+      </label>
+
+      <!-- Register-only: the User Agreement (loaded from the database) -->
+      <div id="registerExtras" class="hidden">
+        <div class="agreement-box">
+          <div class="agreement-head">
+            <span id="agreementTitle">User Agreement</span>
+          </div>
+          <div id="agreementBody" class="agreement-body">Loading agreement…</div>
+        </div>
+        <label class="agree-check">
+          <input id="agreeChk" type="checkbox" />
+          <span id="agreeCheckLabel">I have read and accept the User Agreement.</span>
+        </label>
+      </div>
+
+      <button id="authBtn" class="btn btn-primary btn-block" onclick="submitAuth()">Login</button>
+      <p id="authMsg" class="auth-msg"></p>
+
+      <p class="auth-alt"><a href="/admin/login">Login as staff →</a></p>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/login.js') }}"></script>
+{% endblock %}

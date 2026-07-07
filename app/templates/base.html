@@ -1,0 +1,30 @@
+{#
+  Base layout shared by every page: document head (favicon, fonts, stylesheet)
+  and the common.js include. Child templates fill in these blocks:
+    - title           page title, rendered as "MindMate — <title>"
+    - viewport_extra  optional extras appended to the viewport meta tag
+    - head_scripts    inline scripts that must run before first paint
+    - body            the page markup
+    - scripts         page-specific <script> tags (loaded after common.js)
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0{% block viewport_extra %}{% endblock %}" />
+  {% block head_scripts %}{% endblock %}
+  <title>MindMate — {% block title %}{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('assets', filename='images/logo.png') }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  {% block styles %}{% endblock %}
+</head>
+<body>
+  {% block body %}{% endblock %}
+
+  <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

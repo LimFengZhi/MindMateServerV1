@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Login{% endblock %}
+
+{% block body %}
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="brand">
+        <img class="brand-logo" src="{{ url_for('assets', filename='images/logo.png') }}" alt="MindMate" />
+        <h1>MindMate Staff</h1>
+        <p class="brand-tagline">Sign in with your staff account</p>
+      </div>
+
+      <label class="field">
+        <span>Email</span>
+        <input id="email" type="email" autocomplete="email" placeholder="staff@example.com" />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Password"
+          onkeydown="if(event.key==='Enter') submitStaffLogin()" />
+      </label>
+
+      <button id="staffBtn" class="btn btn-primary btn-block" onclick="submitStaffLogin()">Login</button>
+      <p id="authMsg" class="auth-msg"></p>
+
+      <p class="auth-alt"><a href="/login">← Back to user login</a></p>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin/staff_login.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,45 @@
+{#
+  Shared sidebar. Expects `active_page` ("chat" | "analysis" | "resources")
+  to be set by the page template. On the chat page the "New chat" action is a
+  JS button and the recent-chats list is shown; elsewhere it links to /chat.
+#}
+{% set nav_links = [
+  ("chat",      "/chat",      "💬", "Chat"),
+  ("analysis",  "/analysis",  "📊", "My Emotions"),
+  ("resources", "/resources", "📚", "Resources"),
+] %}
+
+<aside id="sidebar">
+  <div class="sidebar-head">
+    <a class="sidebar-brand" href="/chat">
+      <img class="brand-logo small" src="{{ url_for('assets', filename='images/logo.png') }}" alt="" />
+      <span>MindMate</span>
+    </a>
+    <button class="btn btn-icon sidebar-close" onclick="toggleSidebar()" title="Hide sidebar">«</button>
+  </div>
+
+  <div class="sidebar-body">
+    {% if active_page == "chat" %}
+      <button class="btn btn-primary btn-block new-chat-btn" onclick="newChat()"><span>＋</span> New chat</button>
+    {% else %}
+      <a class="btn btn-primary btn-block new-chat-btn" href="/chat"><span>＋</span> New chat</a>
+    {% endif %}
+
+    <nav class="side-nav">
+      {% for page, href, icon, label in nav_links %}
+        <a class="side-link{% if active_page == page %} active{% endif %}" href="{{ href }}">
+          <span class="ico">{{ icon }}</span><span>{{ label }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+
+    {% if active_page == "chat" %}
+      <div class="side-label">Recent chats</div>
+      <div id="sessionList" class="session-list"></div>
+    {% endif %}
+  </div>
+
+  <div class="sidebar-foot">
+    <button class="btn btn-ghost btn-block" onclick="logout()"><span>⎋</span> Logout</button>
+  </div>
+</aside>

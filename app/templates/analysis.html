@@ -1,0 +1,26 @@
+{% extends "app_base.html" %}
+{% set active_page = "analysis" %}
+
+{% block title %}My Emotions{% endblock %}
+
+{% block topbar_title %}
+  <strong class="topbar-title">My Emotion Analysis</strong>
+{% endblock %}
+
+{% block main %}
+  <main class="content scroll">
+    <div class="analysis-wrap">
+      <div class="analysis-controls">
+        <label class="muted">Session:</label>
+        <select id="sessionSelect" onchange="loadAnalysis(this.value)"></select>
+      </div>
+      <div id="analysisBody">
+        <p class="placeholder">Select a session to see your emotion analysis.</p>
+      </div>
+    </div>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+{% endblock %}

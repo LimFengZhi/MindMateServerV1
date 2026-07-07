@@ -1,0 +1,31 @@
+{% extends "app_base.html" %}
+{% set active_page = "chat" %}
+
+{% block title %}Chat{% endblock %}
+
+{% block topbar_title %}
+  <strong id="currentSessionTitle" class="topbar-title">Chat</strong>
+{% endblock %}
+
+{% block main %}
+  <main class="content">
+    <div id="panels">
+      <section class="panel">
+        <div id="chatPanel" class="panel-body">
+          <p class="placeholder">Ask something below to start the conversation.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="composer">
+    <textarea id="message" rows="1" placeholder="Type your message…"
+      onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); send();}"></textarea>
+    <button id="voiceBtn" class="btn btn-icon" onclick="startVoice()" title="Record voice">🎤</button>
+    <button id="sendBtn" class="btn btn-primary" onclick="send()">Send</button>
+  </footer>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}

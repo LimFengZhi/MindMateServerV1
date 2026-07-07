@@ -1,0 +1,32 @@
+{#
+  Layout for the authenticated app pages (chat / analysis / resources):
+  scrim + sidebar + topbar around a per-page main area. Child templates must:
+    - {% set active_page = "chat" | "analysis" | "resources" %}
+    - fill topbar_title and main (plus title / scripts from base.html)
+#}
+{% extends "base.html" %}
+
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
+
+{% block head_scripts %}
+  {# Set the sidebar default (open on desktop, closed on mobile) before first
+     paint so the drawer doesn't flash on load. #}
+  <script>if (window.matchMedia('(min-width: 901px)').matches) document.documentElement.classList.add('sidebar-open');</script>
+{% endblock %}
+
+{% block body %}
+  <div class="app-wrap">
+    <div id="scrim" onclick="closeSidebar()"></div>
+
+    {% include "partials/sidebar.html" %}
+
+    <div class="main-col">
+      <header class="topbar">
+        <button class="btn btn-icon" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
+        {% block topbar_title %}{% endblock %}
+      </header>
+
+      {% block main %}{% endblock %}
+    </div>
+  </div>
+{% endblock %}

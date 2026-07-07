@@ -1,0 +1,24 @@
+/* Staff admin site. Layers on style.css (topbar, buttons, cards, etc.). */
+.admin-wrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.admin-topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.admin-body { max-width: 980px; margin: 0 auto; }
+.admin-body h2 { margin: 0 0 18px; font-size: 22px; letter-spacing: -.3px; }
+.admin-body .auth-msg { text-align: left; }
+
+/* staff-accounts management (admin only) */
+.staff-form { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 4px; }
+.staff-form input {
+  flex: 1; min-width: 200px; padding: 11px 14px;
+  background: var(--bg-soft); border: 1px solid var(--border-strong);
+  border-radius: 11px; color: var(--text); font: inherit;
+}
+.staff-form input::placeholder { color: var(--faint); }
+.staff-form input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.staff-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.staff-row:last-child { border-bottom: 0; }
+.staff-email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.role-pill {
+  font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  background: var(--blue-soft); color: var(--blue-bright);
+  border: 1px solid rgba(79, 140, 255, .3);
+}

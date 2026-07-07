@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Staff{% endblock %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}" />
+{% endblock %}
+
+{% block body %}
+  <div class="admin-wrap">
+    <header class="topbar">
+      <img class="brand-logo small" src="{{ url_for('assets', filename='images/logo.png') }}" alt="" />
+      <strong class="topbar-title">MindMate — Staff</strong>
+      <div class="admin-topbar-right">
+        <span id="adminEmail" class="muted"></span>
+        <a class="btn btn-ghost" href="/chat">Back to app</a>
+        <button class="btn btn-ghost" onclick="logout()"><span>⎋</span> Logout</button>
+      </div>
+    </header>
+
+    <main class="content scroll">
+      <div class="admin-body">
+        <h2>Overview</h2>
+        <div id="adminStats"><p class="placeholder">Loading…</p></div>
+
+        <!-- Admin-only: create staff logins by email (shown by admin.js) -->
+        <section id="staffSection" class="section-card hidden">
+          <h3>Staff accounts</h3>
+          <p class="muted">Create a staff login: enter their email and a temporary
+            password, then share it with them. If the email already has a MindMate
+            account, it is promoted to staff instead.</p>
+          <div class="staff-form">
+            <input id="staffEmail" type="email" autocomplete="off"
+                   placeholder="staff@example.com" />
+            <input id="staffPassword" type="password" autocomplete="new-password"
+                   placeholder="Temporary password (min 6)" />
+            <button class="btn btn-primary" onclick="createStaff()">Create staff</button>
+          </div>
+          <p id="staffMsg" class="auth-msg"></p>
+          <div id="staffList"><p class="placeholder">Loading…</p></div>
+        </section>
+      </div>
+    </main>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin/admin.js') }}"></script>
+{% endblock %}

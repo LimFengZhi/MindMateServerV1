@@ -1,0 +1,33 @@
+# ===========================================================================
+# MindMate (Supabase multi-agent mental-health companion) — runtime deps.
+#
+# PyTorch is intentionally NOT pinned here: install the build that matches the
+# target machine FIRST (only needed when AI_MODE=real).
+#   CPU only:        pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   GPU (CUDA 12.1): pip install torch --index-url https://download.pytorch.org/whl/cu121
+# ===========================================================================
+
+# --- Web framework ---
+Flask>=3.0
+Flask-Limiter>=3.5          # optional; app degrades gracefully without it
+
+# --- Config ---
+python-dotenv>=1.0
+
+# --- Database / Auth ---
+supabase>=2.0              # Supabase Python client (Postgres + GoTrue auth)
+
+# --- Resource importer (scripts/scrape_resources.py) ---
+requests>=2.31
+beautifulsoup4>=4.12
+
+# --- AI / inference (only loaded when AI_MODE=real) ---
+transformers>=4.44
+accelerate>=0.30
+peft>=0.11
+
+# --- Voice (speech-to-text) ---
+faster-whisper>=1.0
+
+# --- Production WSGI server ---
+gunicorn>=22.0
