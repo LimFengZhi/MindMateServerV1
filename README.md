@@ -34,7 +34,11 @@ In **Authentication → URL Configuration**:
   users to the app's login page.
 
 ### c. Configure `.env`
-Already present in this repo. Confirm these are set:
+Copy the template and fill in your Supabase values:
+```bash
+cp .env.example .env
+```
+The important ones:
 ```
 SUPABASE_URL=...            # your project URL
 SUPABASE_SECRET_KEY=...     # service (secret) key (server-side data access)
@@ -115,6 +119,21 @@ update public.profiles set role = 'admin' where email = 'person@example.com';
 After that, no SQL is needed — admins manage staff entirely from the dashboard.
 Server-side guards (`staff_required` / `admin_required`) re-check the role on
 every request, so demotions take effect immediately.
+
+### Demo admin account
+For trying out the staff site on the development database:
+
+| | |
+|---|---|
+| **Email** | `admin@mindmate.com` |
+| **Password** | `Admin123!` |
+
+Log in via **"Login as staff →"** on the login page (or `/admin/login`).
+
+> ⚠️ This is a **demo credential for local development only**. Anyone who reads
+> this file can sign into that account, so change the password (Supabase →
+> Authentication → Users) or delete the account before the app faces real
+> users or real data.
 
 ---
 

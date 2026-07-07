@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(echo \"=== MultiAgent2 \\(current working dir\\) ===\" && ls -la \"c:/Users/laoli/OneDrive/Desktop/MultiAgent2\" 2>/dev/null | head -50; echo \"\"; echo \"=== consumer_app \\(previous version\\) ===\"; ls -la \"C:/Users/laoli/OneDrive/Desktop/multi agent mental health chat/consumer_app\" 2>/dev/null | head -50)",
-      "Read(//c/Users/laoli/OneDrive/Desktop/multi agent mental health chat/consumer_app/**)",
-      "Bash(\"c:/Users/laoli/OneDrive/Desktop/MultiAgent2/.venv/Scripts/python.exe\" --version)"
-    ]
-  }
-}
