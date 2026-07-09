@@ -24,7 +24,11 @@
       <button class="chip" id="nav-sessions" onclick="switchView('sessions')">💬 User Sessions</button>
       <button class="chip" id="nav-testing" onclick="switchView('testing')">🧪 Testing</button>
       <button class="chip hidden" id="nav-staff" onclick="switchView('staff')">👥 Staff</button>
-      <button class="chip" disabled title="Coming soon">🗂 Dataset (soon)</button>
+      <button class="chip" id="nav-resources_edit" onclick="switchView('resources_edit')">📝 Resources Editing</button>
+      <button class="chip" id="nav-dataset" onclick="switchView('dataset')">🗂 Dataset Management</button>
+      <button class="chip" id="nav-test_analysis" onclick="switchView('test_analysis')">📈 Test Analysis</button>
+      <button class="chip" id="nav-prompts" onclick="switchView('prompts')">🤖 System Prompts</button>
+      <button class="chip" id="nav-agreements" onclick="switchView('agreements')">📜 Agreements</button>
     </nav>
 
     <main class="content scroll">
@@ -49,26 +53,70 @@
         </section>
 
         <section id="view-testing" class="hidden">
-          <h2>Testing</h2>
-          <p class="muted">Choose what you want to test — it opens on its own page.</p>
+          <h2>Mental Health Testing</h2>
+          <p class="muted">Manage Tests.</p>
 
-          <div class="test-picker">
-            <div class="test-card" onclick="location.href='/admin/testing/multi-agent'">
-              <div class="rc-icon tint-calm">🤖</div>
-              <h3>Multi-Agent System</h3>
-              <p>Test the full pipeline end-to-end — diagnostic → crisis routing →
-                summariser → chatbot — rate every reply, and export the run as JSON.</p>
+          <div class="section-card">
+
+            <!-- Container A: The Tests List Grid -->
+            <div id="test-list-container">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                <p class="muted" style="margin:0;">Select a test to edit, or add a new one.</p>
+                <div style="display: flex; gap: 10px;">
+                  <button class="btn btn-ghost small" onclick="loadTestingData()">🔄 Refresh</button>
+                  <button class="btn btn-primary small" onclick="openNewTestEditor()">+ Add Assessment</button>
+                </div>
+              </div>
+              <div id="testListGrid" class="sess-list">
+                <p class="placeholder">Loading assessments...</p>
+              </div>
             </div>
-            <div class="test-card disabled">
-              <div class="rc-icon tint-love">💬</div>
-              <h3>Chatbot only</h3>
-              <p>Coming soon.</p>
+
+            <!-- Container B: The Test Editor Form (Hidden by default) -->
+            <div id="test-form-container" class="hidden">
+              <div style="display: flex; gap: 10px; margin-bottom: 20px; align-items: center;">
+                <button class="btn btn-ghost" onclick="closeTestEditor()">← Back to List</button>
+                <h3 id="editor-test-title" style="margin:0;">Edit Assessment</h3>
+              </div>
+
+              <form id="testForm" onsubmit="saveTestChanges(event)" class="form-grid">
+                <input type="hidden" id="edit-test-id" />
+
+                <div style="display: flex; flex-direction: column; gap: 18px; width: 100%;">
+
+                  <!-- Row 1: Title -->
+                  <div style="width: 100%;">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Assessment Title</label>
+                    <input type="text" id="edit-test-title" class="dash-input" style="width: 100%; box-sizing: border-box;" placeholder="e.g., PHQ-9 Depression Screener" required />
+                  </div>
+
+                  <!-- Row 2: Description -->
+                  <div style="width: 100%;">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Description / Instructions</label>
+                    <textarea id="edit-test-description" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 70px;" placeholder="Instructions shown to the user before starting..."></textarea>
+                  </div>
+
+                  <!-- Row 3: Questions (JSON Format) -->
+                  <div style="width: 100%;">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Questions (JSON Array)</label>
+                    <textarea id="edit-test-questions" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 180px; font-family: monospace;" placeholder='[{"q": "Feeling down, depressed, or hopeless?", "options": ["Not at all", "Several days", "More than half the days", "Nearly every day"]}]'></textarea>
+                  </div>
+
+                </div>
+
+                <!-- Form Footer Utilities -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 14px;">
+                  <p id="testFormMsg" class="auth-msg" style="margin: 0;"></p>
+
+                  <div style="display: flex; gap: 12px; align-items: center;">
+                    <button type="button" id="btn-delete-test" class="btn btn-ghost" style="color: #ff6b6b;" onclick="deleteCurrentTest()">🗑️ Delete</button>
+                    <button type="button" class="btn btn-ghost" onclick="closeTestEditor()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💾 Save Assessment</button>
+                  </div>
+                </div>
+              </form>
             </div>
-            <div class="test-card disabled">
-              <div class="rc-icon tint-stress">🏷️</div>
-              <h3>Emotion Classifier</h3>
-              <p>Coming soon.</p>
-            </div>
+
           </div>
         </section>
 
@@ -90,6 +138,193 @@
           </section>
         </section>
 
+        <section id="view-resources_edit" class="hidden">
+          <h2>Resources Dataset Editing</h2>
+          <p class="muted">Add, modify, or archive self-help guides, exercises, and media resources.</p>
+
+          <div class="section-card">
+            <div id="resourcesEditBody">
+
+              <div id="res-list-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                  <p class="muted" style="margin:0;">Select any resource to edit, or add a new one.</p>
+                  <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-ghost small" onclick="loadResourcesData()">🔄 Refresh</button>
+                    <button class="btn btn-primary small" onclick="openNewResourceEditor()">+ Add Resource</button>
+                  </div>
+                </div>
+                <div id="resListGrid" class="sess-list">
+                  <p class="placeholder">Loading resources dataset...</p>
+                </div>
+              </div>
+
+              <div id="res-form-container" class="hidden">
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; align-items: center;">
+                  <button class="btn btn-ghost" onclick="closeResourceEditor()">← Back to List</button>
+                  <h3 id="editor-resource-title" style="margin:0;">Edit Resource</h3>
+                </div>
+
+                <form id="resourceForm" onsubmit="saveResourceChanges(event)" class="form-grid">
+                  <input type="hidden" id="edit-res-id" />
+
+                  <div class="form-row-2">
+                    <div>
+                      <label class="stat-label" style="display:block; margin-bottom: 6px;">Resource Title</label>
+                      <input type="text" id="edit-res-title" class="dash-input" placeholder="e.g., Deep Breathing Exercises" required />
+                    </div>
+                    <div>
+                      <label class="stat-label" style="display:block; margin-bottom: 6px;">Category</label>
+                      <input type="text" id="edit-res-category" class="dash-input" placeholder="e.g., Stress Management" />
+                    </div>
+                  </div>
+
+                  <div class="form-row-2">
+                    <div>
+                      <label class="stat-label" style="display:block; margin-bottom: 6px;">Resource Format Type</label>
+                      <select id="edit-res-kind" class="dash-select" onchange="toggleFormFieldsByKind()">
+                        <option value="article">💬 Article / Text Guide</option>
+                        <option value="video">🎥 YouTube Video Link</option>
+                        <option value="link">🔗 External Website Link</option>
+                        <option value="test">🧪 External Diagnostic Assessment</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="stat-label" style="display:block; margin-bottom: 6px;">Content Publisher Source</label>
+                      <input type="text" id="edit-res-source" class="dash-input" placeholder="e.g., helpguide.org" />
+                    </div>
+                  </div>
+
+                  <div id="field-external-url">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">External Source URL</label>
+                    <input type="url" id="edit-res-url" class="dash-input" placeholder="https://example.com/resource-link" />
+                  </div>
+
+                  <div>
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Summary Card Text</label>
+                    <textarea id="edit-res-summary" class="dash-textarea" style="min-height: 70px;" placeholder="Brief teaser shown on the user app catalog card..."></textarea>
+                  </div>
+
+                  <div id="field-inhouse-info">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Main Informational Text Body (Markdown/HTML Supported)</label>
+                    <textarea id="edit-res-info" class="dash-textarea" style="min-height: 180px;" placeholder="Type or paste the complete rich text contents of the guide here..."></textarea>
+                  </div>
+
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 14px;">
+                    <label class="dash-checkbox-label">
+                      <input type="checkbox" id="edit-res-published" />
+                      <span>Publish on User App Catalog immediately</span>
+                    </label>
+
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                      <button type="button" id="btn-delete-res" class="btn btn-ghost" style="color: #ff6b6b;" onclick="deleteCurrentResource()">🗑️ Delete</button>
+
+                      <button type="button" class="btn btn-ghost" onclick="closeResourceEditor()">Cancel</button>
+                      <button type="submit" class="btn btn-primary">💾 Save Resource</button>
+                    </div>
+                  </div>
+
+                  <p id="resourceFormMsg" class="auth-msg" style="margin-top: 10px;"></p>
+                </form>
+              </div>
+
+            </div>
+          </div>
+        </section>
+        <section id="view-dataset" class="hidden">
+          <h2>System Datasets</h2>
+          <p class="muted">View training datasets below.</p>
+
+          <!-- Internal sub-navigation tabs -->
+          <div class="chip-row" style="margin-bottom: 16px;">
+            <button class="chip active" id="btn-sub-chatbot" onclick="switchDatasetTab('chatbot')">💬 Chat Bot Dataset</button>
+            <button class="chip" id="btn-sub-classifier" onclick="switchDatasetTab('classifier')">🏷️ Classifier Dataset</button>
+          </div>
+
+          <div id="sub-view-chatbot" class="section-card">
+            <h3>Chat Bot Baseline Corpus</h3>
+            <p class="placeholder">Chat bot training logs and prompt variations placeholder...</p>
+          </div>
+
+          <div id="sub-view-classifier" class="section-card hidden">
+            <h3>Classifier Training Categories</h3>
+            <p class="placeholder">Emotion rules, weights, and confidence labels placeholder...</p>
+          </div>
+        </section>
+
+        <section id="view-test_analysis" class="hidden">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 14px;">
+            <div>
+              <h2>Mental Health Test Analysis</h2>
+              <p class="muted" style="margin: 0;">Aggregated trends, scoring distributions, and diagnostic test metrics.</p>
+            </div>
+            <button class="btn btn-ghost small" onclick="loadTestAnalytics()">🔄 Refresh Data</button>
+          </div>
+
+          <div class="cards" style="margin-bottom: 20px;">
+            <div class="stat-card">
+              <div class="stat-label">Total Assessments Completed</div>
+              <div class="stat-value" id="analysis-total-tests">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Risk Band</div>
+              <div class="stat-value" id="analysis-risk-band">—</div>
+            </div>
+          </div>
+
+          <div class="section-card" style="margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: var(--blue);"> Risk Band Distribution</h3>
+            <div style="height: 240px; width: 100%; position: relative;">
+              <canvas id="testScoreChart" style="display: block; width: 100%; height: 240px;"></canvas>
+            </div>
+          </div>
+
+          <h3 style="margin-bottom: 12px; color: var(--text);">Breakdown by Tests</h3>
+          <div id="test-analytics-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+            <p class="placeholder">Loading analytics...</p>
+          </div>
+        </section>
+
+        <section id="view-prompts" class="hidden">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 14px;">
+            <div>
+              <h2>System Prompts Editor</h2>
+              <p class="muted" style="margin: 0;">Modify or create core pipeline instructions.</p>
+            </div>
+            <button class="btn btn-primary" onclick="toggleNewPromptForm()">+ Add Prompt</button>
+          </div>
+
+          <div id="new-prompt-container" class="section-card hidden" style="margin-bottom: 20px; border-color: var(--blue);">
+            <h3 style="color: var(--blue); margin-top: 0;">Create New Prompt</h3>
+
+            <label class="stat-label" style="display:block; margin-bottom: 6px;">Prompt Name Identifier</label>
+            <input type="text" id="new-prompt-name" class="dash-input" style="margin-bottom: 14px;" placeholder="e.g., triage_agent" />
+
+            <label class="stat-label" style="display:block; margin-bottom: 6px;">Instruction Content</label>
+            <textarea id="new-prompt-content" class="dash-textarea" style="min-height: 120px; margin-bottom: 14px;" placeholder="You are an AI assistant that..."></textarea>
+
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <p id="new-prompt-msg" class="auth-msg" style="margin: 0;"></p>
+              <div style="display: flex; gap: 10px;">
+                <button class="btn btn-ghost" onclick="toggleNewPromptForm()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitNewPrompt()">💾 Save New Prompt</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div id="promptsList"><p class="placeholder">Loading prompts...</p></div>
+          </div>
+        </section>
+
+        <section id="view-agreements" class="hidden">
+          <h2>User Agreements & Consent</h2>
+          <p class="muted">Manage the Terms of Service and Consent text that users must accept on first login.</p>
+          <div class="section-card">
+            <div id="agreementsList"><p class="placeholder">Loading agreements...</p></div>
+          </div>
+        </section>
+
+
       </div>
     </main>
   </div>
@@ -97,5 +332,6 @@
 
 {% block scripts %}
   <script src="{{ url_for('static', filename='js/admin/review_helpers.js') }}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="{{ url_for('static', filename='js/admin/admin.js') }}"></script>
 {% endblock %}
