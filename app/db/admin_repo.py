@@ -5,6 +5,8 @@ Dashboard endpoints return aggregates (counts); the session-review functions
 expose transcripts to staff BY DESIGN (counselling review + reply feedback) —
 they are only reachable through staff_required routes.
 """
+from datetime import datetime, timezone
+
 from app.db.repo import APIError, _none_if_bad_uuid
 from app.extensions import get_sb
 
@@ -25,6 +27,7 @@ def get_stats():
         "escalations": _count("messages", escalated=True),
         "testsTaken": _count("test_created"),
         "resources": _count("resources"),
+        "pendingReviews": _count("messages", status="pending"),
     }
 
 
@@ -87,7 +90,7 @@ def get_session_review(session_id):
     """One session's transcript with diagnostic + feedback fields, or None."""
     try:
         res = (get_sb().table("sessions")
-               .select("id, user_id, title, created_at")
+               .select("id, user_id, title, mode, created_at")
                .eq("id", session_id)
                .limit(1)
                .execute())
@@ -98,8 +101,9 @@ def get_session_review(session_id):
     s = res.data[0]
     emails = _emails_by_user()
     msgs = (get_sb().table("messages")
-            .select("id, question, reply, emotion, emotion_confidence, "
-                    "escalated, rating, feedback, created_at")
+            .select("id, question, reply, draft_reply, status, reviewed_at, "
+                    "emotion, emotion_confidence, escalated, rating, feedback, "
+                    "created_at")
             .eq("session_id", session_id)
             .order("created_at", desc=False)
             .execute()).data or []
@@ -107,6 +111,7 @@ def get_session_review(session_id):
         "session": {
             "sessionID": s["id"],
             "title": s.get("title") or "New chat",
+            "mode": s.get("mode") or "multi",
             "createdAt": s.get("created_at"),
             "email": emails.get(s["user_id"]) or "unknown",
         },
@@ -114,6 +119,9 @@ def get_session_review(session_id):
             "messageID": m["id"],
             "question": m["question"],
             "reply": m.get("reply"),
+            "draft": m.get("draft_reply"),
+            "status": m.get("status") or "delivered",
+            "reviewedAt": m.get("reviewed_at"),
             "emotion": m.get("emotion"),
             "confidence": m.get("emotion_confidence"),
             "escalated": bool(m.get("escalated")),
@@ -122,6 +130,93 @@ def get_session_review(session_id):
             "createdAt": m.get("created_at"),
         } for m in msgs],
     }
+
+
+# ---------------------------------------------------------------------------
+# Live counselling (staff): connect to a user's experiment chat
+# ---------------------------------------------------------------------------
+def list_experiment_sessions():
+    """Every experiment-mode session with its owner email, message count and
+    how many turns still await review — the 'choose a user to connect' list."""
+    sessions = (get_sb().table("sessions")
+                .select("id, user_id, title, created_at")
+                .eq("mode", "experiment")
+                .order("created_at", desc=True)
+                .execute()).data or []
+    emails = _emails_by_user()
+    msgs = (get_sb().table("messages")
+            .select("session_id, status")
+            .execute()).data or []
+    counts, pending = {}, {}
+    for m in msgs:
+        sid = m["session_id"]
+        counts[sid] = counts.get(sid, 0) + 1
+        if m.get("status") == "pending":
+            pending[sid] = pending.get(sid, 0) + 1
+    return [{
+        "sessionID": s["id"],
+        "title": s.get("title") or "New chat",
+        "email": emails.get(s["user_id"]) or "unknown",
+        "createdAt": s.get("created_at"),
+        "messageCount": counts.get(s["id"], 0),
+        "pendingCount": pending.get(s["id"], 0),
+    } for s in sessions]
+
+
+def rename_session_admin(session_id, title):
+    """Staff rename of ANY session (used from the live counselling view)."""
+    try:
+        upd = (get_sb().table("sessions")
+               .update({"title": title})
+               .eq("id", session_id)
+               .execute())
+    except APIError as e:
+        return _none_if_bad_uuid(e)
+    return upd.data[0] if upd.data else None
+
+
+# ---------------------------------------------------------------------------
+# Draft resolution (staff): approve/replace a pending experiment-mode turn
+# ---------------------------------------------------------------------------
+def resolve_pending_message(message_id, reviewer_id, edited_reply=None):
+    """Approve (edited_reply=None) or replace a pending draft.
+
+    Returns ("ok", row) on success, ("conflict", row) if another staff member
+    already resolved it, ("not_found", None) if the message doesn't exist.
+    The UPDATE is conditioned on status='pending' so two simultaneous reviews
+    can't both win — the loser's update matches zero rows.
+    """
+    try:
+        res = (get_sb().table("messages")
+               .select("id, status, draft_reply")
+               .eq("id", message_id)
+               .limit(1)
+               .execute())
+    except APIError as e:
+        return ("not_found", _none_if_bad_uuid(e))
+    if not res.data:
+        return ("not_found", None)
+    row = res.data[0]
+    if row["status"] != "pending":
+        return ("conflict", row)
+
+    if edited_reply is None:
+        # Approve: deliver the draft verbatim.
+        update = {"status": "approved", "reply": row.get("draft_reply")}
+    else:
+        # Edit: the staff text is delivered; the draft is recorded as rejected.
+        update = {"status": "rejected", "reply": edited_reply}
+    update["reviewed_by"] = reviewer_id
+    update["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+
+    upd = (get_sb().table("messages")
+           .update(update)
+           .eq("id", message_id)
+           .eq("status", "pending")   # the race guard
+           .execute())
+    if not upd.data:
+        return ("conflict", row)
+    return ("ok", upd.data[0])
 
 
 # ---------------------------------------------------------------------------
@@ -148,126 +243,127 @@ def get_profile_by_email(email):
 def set_role(user_id, role):
     get_sb().table("profiles").update({"role": role}).eq("id", user_id).execute()
 
+
+# ---------------------------------------------------------------------------
+# Content editors (staff): resources, prompts, agreements, tests
+# ---------------------------------------------------------------------------
+def _attempt(write):
+    """Run one Supabase write, reporting success as a bool. The editor
+    endpoints turn False into a generic 500 rather than leaking DB errors."""
+    try:
+        write()
+        return True
+    except Exception:
+        return False
+
+
 def list_all_resources():
-    """Fetch all mental health resources, sorted by sort_order."""
     res = (get_sb().table("resources")
            .select("*")
            .order("sort_order", desc=False)
            .execute())
     return res.data or []
 
-def update_resource(resource_id, data):
-    """Update a specific resource row in Supabase by its UUID."""
-    try:
-        get_sb().table("resources")\
-            .update(data)\
-            .eq("id", resource_id)\
-            .execute()
-        return True
-    except Exception:
-        return False
 
 def create_resource(data):
-    """Create a completely new resource in Supabase."""
-    try:
-        get_sb().table("resources").insert(data).execute()
-        return True
-    except Exception:
-        return False
+    return _attempt(lambda: get_sb().table("resources").insert(data).execute())
+
+
+def update_resource(resource_id, data):
+    return _attempt(lambda: get_sb().table("resources")
+                    .update(data).eq("id", resource_id).execute())
+
 
 def delete_resource(resource_id):
-    """Delete a resource from Supabase."""
-    try:
-        get_sb().table("resources").delete().eq("id", resource_id).execute()
-        return True
-    except Exception:
-        return False
+    return _attempt(lambda: get_sb().table("resources")
+                    .delete().eq("id", resource_id).execute())
 
-# --- Prompts ---
+
+# Prompts are keyed by their `name` column (the editor passes names as ids).
 def list_prompts():
-    """Fetch system prompts from Supabase."""
-    res = get_sb().table("prompts").select("*").execute()
-    return res.data or []
+    return (get_sb().table("prompts").select("*").execute()).data or []
+
 
 def create_prompt(name, content):
-    """Insert a new system prompt into the database."""
+    """Returns (ok, error_message) so a duplicate name gets a clear message."""
     try:
-        # Check if it already exists to avoid duplicates
         existing = get_sb().table("prompts").select("name").eq("name", name).execute()
         if existing.data:
             return False, "A prompt with this name already exists."
-
         get_sb().table("prompts").insert({"name": name, "content": content}).execute()
         return True, None
     except Exception as e:
         return False, str(e)
 
-def update_prompt(prompt_id, content):
-    """Update a specific prompt's content."""
-    try:
-        get_sb().table("prompts").update({"content": content}).eq("name", prompt_id).execute()
-        return True
-    except Exception:
-        return False
 
-def delete_prompt(prompt_id):
-    """Delete a system prompt from the database."""
-    try:
-        # Note: Assuming 'name' is the identifier as used in earlier steps.
-        # If your table uses 'id', change "name" to "id".
-        get_sb().table("prompts").delete().eq("name", prompt_id).execute()
-        return True
-    except Exception:
-        return False
+def update_prompt(name, content):
+    return _attempt(lambda: get_sb().table("prompts")
+                    .update({"content": content}).eq("name", name).execute())
 
-# --- Agreements ---
+
+def delete_prompt(name):
+    return _attempt(lambda: get_sb().table("prompts")
+                    .delete().eq("name", name).execute())
+
+
 def list_agreements():
-    """Fetch user agreements from Supabase."""
-    res = get_sb().table("agreements").select("*").execute()
-    return res.data or []
+    return (get_sb().table("agreements").select("*").execute()).data or []
+
 
 def update_agreement(agreement_id, content):
-    """Update a specific agreement's content."""
-    try:
-        get_sb().table("agreements").update({"content": content}).eq("id", agreement_id).execute()
-        return True
-    except Exception:
-        return False
+    return _attempt(lambda: get_sb().table("agreements")
+                    .update({"content": content}).eq("id", agreement_id).execute())
+
 
 def list_tests():
-    """Fetch all diagnostic tests from Supabase."""
-    res = get_sb().table("test").select("*").execute()
-    return res.data or []
+    return (get_sb().table("test").select("*").execute()).data or []
+
 
 def create_test(data):
-    """Create a completely new diagnostic test in Supabase."""
-    try:
-        get_sb().table("test").insert(data).execute()
-        return True
-    except Exception:
-        return False
+    return _attempt(lambda: get_sb().table("test").insert(data).execute())
+
 
 def update_test(test_id, data):
-    """Update an existing diagnostic test."""
-    try:
-        get_sb().table("test").update(data).eq("id", test_id).execute()
-        return True
-    except Exception:
-        return False
+    return _attempt(lambda: get_sb().table("test")
+                    .update(data).eq("id", test_id).execute())
+
 
 def delete_test(test_id):
-    """Delete a diagnostic test from Supabase."""
-    try:
-        get_sb().table("test").delete().eq("id", test_id).execute()
-        return True
-    except Exception:
-        return False
+    return _attempt(lambda: get_sb().table("test")
+                    .delete().eq("id", test_id).execute())
 
-def get_test_analytics():
-    """Fetch analytics from the test_created table, including the test title."""
+
+# ---------------------------------------------------------------------------
+# Test analytics (staff)
+# ---------------------------------------------------------------------------
+def _test_attempt_rows():
+    """Completed attempts with the owning test's title (FK-embedded)."""
     try:
-        # The syntax test(title) tells Supabase to follow the foreign key and grab the title
-        res = get_sb().table("test_created").select("score, band, created_at, test(title)").execute()
+        res = (get_sb().table("test_created")
+               .select("score, band, created_at, test(title)")
+               .execute())
         return res.data or []
     except Exception:
         return []
+
+
+def get_test_analytics():
+    """Per-test aggregate: {title: {total_takes, total_score, avg_score,
+    bands: {band: count}}}. Attempts whose test was deleted are skipped."""
+    analytics = {}
+    for row in _test_attempt_rows():
+        test_info = row.get("test")
+        if not test_info:
+            continue
+        title = test_info.get("title", "Unknown Assessment")
+        stats = analytics.setdefault(
+            title, {"total_takes": 0, "total_score": 0, "bands": {}})
+        stats["total_takes"] += 1
+        stats["total_score"] += row.get("score") or 0
+        band = row.get("band") or "Unscored"
+        stats["bands"][band] = stats["bands"].get(band, 0) + 1
+
+    for stats in analytics.values():
+        takes = stats["total_takes"]
+        stats["avg_score"] = round(stats["total_score"] / takes, 1) if takes else 0
+    return analytics

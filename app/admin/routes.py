@@ -14,16 +14,20 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, Response, render_template, request, jsonify, g
 
+from app.admin import live_claims
 from app.admin.service import create_staff_account
 from app.auth.decorators import staff_required, admin_required
 from app.auth.routes import EMAIL_RE
 from app.auth.service import AuthError
+from app.chat.routes import user_or_ip
 from app.db.admin_repo import (
     get_stats, get_emotion_overview, list_all_sessions, get_session_review,
     list_staff_accounts, set_role, list_all_resources, update_resource, list_prompts, update_prompt, list_agreements, update_agreement,
     create_prompt, delete_prompt, create_resource, delete_resource, list_tests, create_test, update_test, delete_test, get_test_analytics,
+    resolve_pending_message, list_experiment_sessions, rename_session_admin,
 )
 from app.db.repo import get_profile, set_message_feedback
+from app.extensions import limiter
 from app.http_utils import json_error
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -45,6 +49,11 @@ def staff_login_page():
 @admin_bp.get("/testing/multi-agent")
 def test_multi_page():
     return render_template("admin/test_multi.html")
+
+
+@admin_bp.get("/live")
+def live_page():
+    return render_template("admin/live.html")
 
 
 # ---------------- JSON API: dashboard ----------------
@@ -69,6 +78,7 @@ def sessions_list():
 
 @admin_api_bp.get("/sessions/<session_id>")
 @staff_required
+@limiter.limit("60 per minute", key_func=user_or_ip)  # live view polls it ~4s
 def session_review(session_id):
     data = get_session_review(session_id)
     if not data:
@@ -111,6 +121,89 @@ def message_feedback(message_id):
                     "feedback": row.get("feedback")})
 
 
+# ---------------- JSON API: live counselling (connect to a user) ----------------
+@admin_api_bp.get("/live-sessions")
+@staff_required
+@limiter.limit("30 per minute", key_func=user_or_ip)  # the live view polls ~4s
+def live_sessions():
+    """Experiment sessions a counsellor can connect to, with pending counts,
+    plus who currently has each user claimed. Polling this doubles as the
+    caller's claim heartbeat."""
+    live_claims.heartbeat(g.user["id"])
+    return jsonify({
+        "sessions": list_experiment_sessions(),
+        "claims": live_claims.claims_by_email(),
+    })
+
+
+@admin_api_bp.post("/live-claim")
+@staff_required
+def live_claim():
+    """Take charge of a user. 409 if another staff member already has them."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return json_error("email required", 400)
+    ok, holder = live_claims.claim_user(email, g.user["id"], g.user["email"])
+    if not ok:
+        return json_error(f"this user is being handled by {holder}", 409)
+    return jsonify({"ok": True})
+
+
+@admin_api_bp.post("/live-release")
+@staff_required
+def live_release():
+    """Stop being in charge of a user (only the holder can release)."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if email:
+        live_claims.release_user(email, g.user["id"])
+    return jsonify({"ok": True})
+
+
+@admin_api_bp.post("/sessions/<session_id>/rename")
+@staff_required
+def session_rename_admin(session_id):
+    """Staff rename of a user's session (live counselling case label)."""
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return json_error("title required", 400)
+    if len(title) > 80:
+        return json_error("title too long (max 80)", 400)
+    row = rename_session_admin(session_id, title)
+    if not row:
+        return json_error("session not found", 404)
+    return jsonify({"ok": True, "title": row["title"]})
+
+
+# ---------------- JSON API: experiment-mode draft resolution ----------------
+@admin_api_bp.post("/review/<message_id>")
+@staff_required
+def review_resolve(message_id):
+    """Approve a pending draft verbatim, or send an edited reply in its place
+    (the edit is the feedback; the original draft is recorded as rejected)."""
+    data = request.get_json(silent=True) or {}
+    action = data.get("action")
+    if action == "approve":
+        edited = None
+    elif action == "edit":
+        edited = (data.get("reply") or "").strip()
+        if not edited:
+            return json_error("edited reply cannot be empty", 400)
+        if len(edited) > 4000:
+            return json_error("edited reply too long (max 4000)", 400)
+    else:
+        return json_error("action must be 'approve' or 'edit'", 400)
+
+    outcome, row = resolve_pending_message(message_id, g.user["id"], edited)
+    if outcome == "not_found":
+        return json_error("message not found", 404)
+    if outcome == "conflict":
+        return json_error("this reply was already reviewed", 409)
+    return jsonify({"ok": True, "status": row["status"]})
+
+
 @admin_api_bp.get("/staff")
 @admin_required
 def staff_list():
@@ -144,112 +237,96 @@ def staff_remove(user_id):
     return jsonify({"ok": True})
 
 
-@admin_api_bp.get("/resources")
-@staff_required
-def admin_resources_list():
-    """API endpoint to get all resources for editing."""
-    return jsonify({"resources": list_all_resources()})
+# ---------------- JSON API: content editors ----------------
+def _write_response(ok, failure_message):
+    """Editor writes report success as a bool (see admin_repo._attempt)."""
+    if ok:
+        return jsonify({"ok": True})
+    return json_error(failure_message, 500)
 
 
-@admin_api_bp.post("/resources/<resource_id>")
-@staff_required
-def admin_resource_update(resource_id):
-    """API endpoint to save edited resource attributes."""
-    data = request.get_json(silent=True) or {}
-
-    title = (data.get("title") or "").strip()
-    if not title:
-        return json_error("A resource title is required.", 400)
-
-    # Gather data payloads conforming to table schema definitions
-    payload = {
-        "title": title,
+def _resource_payload(data):
+    return {
+        "title": (data.get("title") or "").strip(),
         "category": data.get("category"),
         "summary": data.get("summary"),
         "info": data.get("info"),
         "kind": data.get("kind", "article"),
         "external_url": data.get("external_url"),
         "source": data.get("source"),
-        "is_published": bool(data.get("is_published", True))
+        "is_published": bool(data.get("is_published", True)),
     }
 
-    if update_resource(resource_id, payload):
-        return jsonify({"ok": True})
-    return json_error("Failed to update resource in database.", 500)
+
+@admin_api_bp.get("/resources")
+@staff_required
+def admin_resources_list():
+    return jsonify({"resources": list_all_resources()})
 
 
 @admin_api_bp.post("/resources")
 @staff_required
 def admin_resource_create():
-    """API endpoint to create a new resource."""
-    data = request.get_json(silent=True) or {}
-    title = (data.get("title") or "").strip()
-
-    if not title:
+    payload = _resource_payload(request.get_json(silent=True) or {})
+    if not payload["title"]:
         return json_error("A resource title is required.", 400)
+    return _write_response(create_resource(payload),
+                           "Failed to create resource in database.")
 
-    payload = {
-        "title": title,
-        "category": data.get("category"),
-        "summary": data.get("summary"),
-        "info": data.get("info"),
-        "kind": data.get("kind", "article"),
-        "external_url": data.get("external_url"),
-        "source": data.get("source"),
-        "is_published": bool(data.get("is_published", True))
-    }
 
-    if create_resource(payload):
-        return jsonify({"ok": True})
-    return json_error("Failed to create resource in database.", 500)
+@admin_api_bp.post("/resources/<resource_id>")
+@staff_required
+def admin_resource_update(resource_id):
+    payload = _resource_payload(request.get_json(silent=True) or {})
+    if not payload["title"]:
+        return json_error("A resource title is required.", 400)
+    return _write_response(update_resource(resource_id, payload),
+                           "Failed to update resource in database.")
 
 
 @admin_api_bp.delete("/resources/<resource_id>")
 @staff_required
 def admin_resource_delete(resource_id):
-    """API endpoint to delete a resource."""
-    if delete_resource(resource_id):
-        return jsonify({"ok": True})
-    return json_error("Failed to delete resource.", 500)
+    return _write_response(delete_resource(resource_id),
+                           "Failed to delete resource.")
+
 
 @admin_api_bp.get("/dataset/<dataset_type>")
 @staff_required
 def get_dashboard_dataset(dataset_type):
-    if dataset_type not in ["chatbot", "classifier"]:
+    """Page through a local training-data file (JSON array or JSONL)."""
+    if dataset_type not in ("chatbot", "classifier"):
         return json_error("Invalid dataset selection", 400)
 
     file_path = os.path.join(DATASET_DIR, f"{dataset_type}.json")
-
     if not os.path.exists(file_path):
         return jsonify({"data": [], "total": 0, "page": 1})
 
-    page = int(request.args.get("page", 1))
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        return json_error("page must be a number", 400)
     per_page = 100
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             try:
-                dataset_content = json.load(f)
+                rows = json.load(f)
             except json.JSONDecodeError:
                 f.seek(0)
-                dataset_content = [json.loads(line) for line in f if line.strip()]
+                rows = [json.loads(line) for line in f if line.strip()]
 
-        total_items = len(dataset_content)
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        paginated_data = dataset_content[start_idx:end_idx]
-
+        start = (page - 1) * per_page
         return jsonify({
-            "data": paginated_data,
-            "total": total_items,
+            "data": rows[start:start + per_page],
+            "total": len(rows),
             "page": page,
-            "total_pages": (total_items + per_page - 1) // per_page
+            "total_pages": (len(rows) + per_page - 1) // per_page,
         })
     except Exception as e:
         return json_error(f"Failed reading local dataset: {str(e)}", 500)
 
 
-# --- Prompts API ---
 @admin_api_bp.get("/prompts")
 @staff_required
 def get_dashboard_prompts():
@@ -259,43 +336,38 @@ def get_dashboard_prompts():
 @admin_api_bp.post("/prompts")
 @staff_required
 def add_dashboard_prompt():
-    """Create a completely new system prompt."""
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     content = (data.get("content") or "").strip()
-
     if not name or not content:
         return json_error("Both a prompt name and content are required.", 400)
 
-    # Ensure name is formatted safely (no spaces, lowercase)
+    # Prompt names double as identifiers, so normalize them on the way in.
     clean_name = name.lower().replace(" ", "_")
-
     success, error_msg = create_prompt(clean_name, content)
     if success:
         return jsonify({"ok": True, "name": clean_name})
     return json_error(error_msg or "Failed to create prompt.", 500)
 
-@admin_api_bp.post("/prompts/<prompt_id>")
+
+@admin_api_bp.post("/prompts/<prompt_name>")
 @staff_required
-def save_dashboard_prompt(prompt_id):
+def save_dashboard_prompt(prompt_name):
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
     if not content:
         return json_error("Prompt content cannot be empty.", 400)
+    return _write_response(update_prompt(prompt_name, content),
+                           "Failed to update prompt.")
 
-    if update_prompt(prompt_id, content):
-        return jsonify({"ok": True})
-    return json_error("Failed to update prompt.", 500)
 
-@admin_api_bp.delete("/prompts/<prompt_id>")
+@admin_api_bp.delete("/prompts/<prompt_name>")
 @staff_required
-def remove_dashboard_prompt(prompt_id):
-    """API endpoint to delete a system prompt."""
-    if delete_prompt(prompt_id):
-        return jsonify({"ok": True})
-    return json_error("Failed to delete prompt from database.", 500)
+def remove_dashboard_prompt(prompt_name):
+    return _write_response(delete_prompt(prompt_name),
+                           "Failed to delete prompt from database.")
 
-# --- Agreements API ---
+
 @admin_api_bp.get("/agreements")
 @staff_required
 def get_dashboard_agreements():
@@ -309,104 +381,55 @@ def save_dashboard_agreement(agreement_id):
     content = (data.get("content") or "").strip()
     if not content:
         return json_error("Agreement content cannot be empty.", 400)
-
-    if update_agreement(agreement_id, content):
-        return jsonify({"ok": True})
-    return json_error("Failed to update agreement.", 500)
+    return _write_response(update_agreement(agreement_id, content),
+                           "Failed to update agreement.")
 
 
 @admin_api_bp.get("/tests")
 @staff_required
 def admin_tests_list():
-    """API endpoint to fetch all tests."""
     return jsonify({"data": list_tests()})
 
 
 @admin_api_bp.post("/tests")
 @staff_required
 def admin_test_create():
-    """API endpoint to create a new test."""
     data = request.get_json(silent=True) or {}
     title = (data.get("title") or "").strip()
-
     if not title:
         return json_error("A test title is required.", 400)
-
-    slug = title.lower().replace(" ", "-")
-
     payload = {
         "title": title,
-        "slug": slug,
+        "slug": title.lower().replace(" ", "-"),
         "description": data.get("description"),
         "questions": data.get("questions", []),
         "scoring": data.get("scoring", {}),
-        "is_published": True
+        "is_published": True,
     }
-
-    if create_test(payload):
-        return jsonify({"ok": True})
-    return json_error("Failed to create test in database.", 500)
+    return _write_response(create_test(payload),
+                           "Failed to create test in database.")
 
 
 @admin_api_bp.post("/tests/<test_id>")
 @staff_required
 def admin_test_update(test_id):
-    """API endpoint to update an existing test."""
     data = request.get_json(silent=True) or {}
-
     payload = {
         "title": data.get("title"),
         "description": data.get("description"),
-        "questions": data.get("questions")
+        "questions": data.get("questions"),
     }
+    return _write_response(update_test(test_id, payload),
+                           "Failed to update test.")
 
-    if update_test(test_id, payload):
-        return jsonify({"ok": True})
-    return json_error("Failed to update test.", 500)
 
 @admin_api_bp.delete("/tests/<test_id>")
 @staff_required
 def admin_test_delete(test_id):
-    """API endpoint to delete a test."""
-    if delete_test(test_id):
-        return jsonify({"ok": True})
-    return json_error("Failed to delete test.", 500)
+    return _write_response(delete_test(test_id), "Failed to delete test.")
 
 
 @admin_api_bp.get("/analytics/tests")
 @staff_required
 def admin_test_analytics_api():
-    """API endpoint to aggregate and serve test results analytics."""
-    raw_data = get_test_analytics()
-
-    analytics = {}
-    for row in raw_data:
-        # Handle cases where the test might have been deleted but records remain
-        test_info = row.get("test")
-        if not test_info:
-            continue
-
-        title = test_info.get("title", "Unknown Assessment")
-        score = row.get("score") or 0
-        band = row.get("band") or "Unscored"
-
-        # Initialize the dictionary structure for a new test
-        if title not in analytics:
-            analytics[title] = {"total_takes": 0, "total_score": 0, "bands": {}}
-
-        analytics[title]["total_takes"] += 1
-        analytics[title]["total_score"] += score
-
-        # Count the severity bands
-        if band not in analytics[title]["bands"]:
-            analytics[title]["bands"][band] = 0
-        analytics[title]["bands"][band] += 1
-
-    # Calculate final averages
-    for title, stats in analytics.items():
-        if stats["total_takes"] > 0:
-            stats["avg_score"] = round(stats["total_score"] / stats["total_takes"], 1)
-        else:
-            stats["avg_score"] = 0
-
-    return jsonify({"data": analytics})
+    return jsonify({"data": get_test_analytics()})

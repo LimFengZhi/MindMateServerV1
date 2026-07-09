@@ -106,7 +106,17 @@ Check what's loaded at any time: <http://localhost:5000/health>.
 Every user gets the `user` role automatically (via the `profiles` table).
 
 - **staff** — the full backoffice at `/admin`:
-  - **Overview** — usage stats (users, sessions, messages, escalations, tests taken)
+  - **Live Counselling** (`/admin/live`) — supervision of **experiment mode**:
+    users can start a chat in experiment mode, and every bot reply (crisis
+    responses included) is held as a draft until a counsellor resolves it. The
+    counsellor **takes charge of up to two users** (those needing attention are
+    flagged and sorted first), picks one of each user's live sessions, watches
+    the conversation live side by side, and **approves** the draft or **edits**
+    it (the edit is delivered; the bot's draft is recorded as rejected). The counsellor can also
+    rename the session as a case label. Meanwhile the user's chat shows "being
+    reviewed by a counsellor…" and polls until delivery.
+  - **Overview** — usage stats (users, sessions, messages, escalations, pending
+    reviews, tests taken)
   - **Emotion Analysis** — emotion distribution + escalations across all users
   - **User Sessions** — pick a user → pick a chat → review the transcript with
     per-reply diagnostics; **rate each bot reply (1–5 ★), leave feedback**, and

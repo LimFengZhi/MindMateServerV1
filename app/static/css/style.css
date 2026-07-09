@@ -335,7 +335,20 @@ a:hover { text-decoration: underline; }
   transition: border-color .18s, box-shadow .18s;
 }
 #message::placeholder { color: var(--faint); }
+#message:disabled { opacity: .55; cursor: not-allowed; }
 /* #message:focus shares the input focus-ring rule defined in the AUTH section */
+
+/* ---- experiment mode (supervised live counselling) ---- */
+.mode-toggle {
+  padding: 10px 24px; border-top: 1px solid var(--border);
+  background: var(--glass-bg); backdrop-filter: blur(12px);
+  font-size: 13px; color: var(--muted);
+}
+.mode-toggle label { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.mode-toggle input { width: 16px; height: 16px; accent-color: var(--blue); flex: 0 0 auto; }
+.tag.experiment { background: var(--blue-soft); color: var(--blue-bright); border-color: rgba(79, 140, 255, .4); }
+.bubble.waiting-review { border-color: rgba(79, 140, 255, .45); }
+.s-supervised { color: var(--blue-bright); font-weight: 600; }
 
 /* ===================== ANALYSIS PAGE ===================== */
 .analysis-wrap { max-width: 920px; margin: 0 auto; }

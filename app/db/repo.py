@@ -96,7 +96,7 @@ def create_session(user_id, title="New chat", mode="multi"):
 
 def list_sessions(user_id):
     res = (get_sb().table("sessions")
-           .select("id, title, created_at")
+           .select("id, title, mode, created_at")
            .eq("user_id", user_id)
            .order("created_at", desc=True)
            .execute())
@@ -138,13 +138,19 @@ def delete_session(user_id, session_id):
 # Messages (one row per conversation turn)
 # ---------------------------------------------------------------------------
 def add_message(user_id, session_id, question, reply, emotion=None,
-                confidence=None, escalated=False, summary=None):
+                confidence=None, escalated=False, summary=None,
+                status="delivered", draft_reply=None):
+    """Insert one turn. Normal chats: status='delivered' and draft_reply falls
+    back to the reply itself. Experiment chats: reply=None + status='pending'
+    with the pipeline output held in draft_reply until staff resolve it."""
     res = (get_sb().table("messages")
            .insert({
                "user_id": user_id,
                "session_id": session_id,
                "question": question,
                "reply": reply,
+               "draft_reply": draft_reply if draft_reply is not None else reply,
+               "status": status,
                "emotion": emotion,
                "emotion_confidence": confidence,
                "escalated": escalated,
@@ -204,15 +210,54 @@ def get_history(user_id, session_id, limit=10):
     return turns if limit is None else turns[-limit:]
 
 
+def _public_status(db_status):
+    """The user-facing status. approved/rejected are staff-side detail — the
+    user only ever learns 'pending' vs 'delivered', never that a counsellor
+    replaced the draft."""
+    return "pending" if db_status == "pending" else "delivered"
+
+
 def get_transcript(user_id, session_id):
     """Ordered turns for rebuilding the chat view."""
     rows = _session_messages(user_id, session_id)
     return [{
+        "messageID": r["id"],
         "question": r["question"],
+        "status": _public_status(r.get("status")),
         "reply": ({"reply": r.get("reply"), "escalated": bool(r.get("escalated"))}
                   if r.get("reply") is not None else None),
         "created_at": r.get("created_at"),
     } for r in rows]
+
+
+def get_pending_status(user_id, session_id):
+    """Poll payload for an experiment chat: the state of every reviewed turn.
+
+    Turns still pending come back minimal; resolved turns carry everything the
+    chat page needs to swap the waiting bubble for the real reply. Never
+    exposes draft_reply or the approved/rejected distinction.
+    """
+    res = (get_sb().table("messages")
+           .select("id, status, reply, emotion, emotion_confidence, escalated")
+           .eq("user_id", user_id)
+           .eq("session_id", session_id)
+           .in_("status", ["pending", "approved", "rejected"])
+           .order("created_at", desc=False)
+           .execute())
+    out = []
+    for r in (res.data or []):
+        if r["status"] == "pending":
+            out.append({"messageID": r["id"], "status": "pending"})
+        else:
+            out.append({
+                "messageID": r["id"],
+                "status": "delivered",
+                "reply": r.get("reply"),
+                "emotion": r.get("emotion"),
+                "confidence": r.get("emotion_confidence"),
+                "escalated": bool(r.get("escalated")),
+            })
+    return out
 
 
 def get_analysis(user_id, session_id):

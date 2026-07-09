@@ -67,7 +67,8 @@ const String kBaseUrl = String.fromEnvironment('API_BASE',
 | 9 | `DELETE /sessions/{id}` | ✔ | Delete a chat |
 | 10 | `GET /sessions/{id}/messages` | ✔ | Load a chat's full transcript |
 | 11 | `GET /sessions/{id}/analysis` | ✔ | Emotion analysis for a chat |
-| 12 | `POST /chat` | ✔ | Send a text message → get the bot reply |
+| 11b | `GET /sessions/{id}/pending` | ✔ | Experiment mode: poll for counsellor-reviewed replies |
+| 12 | `POST /chat` | ✔ | Send a text message → get the bot reply (or `pending` in experiment mode) |
 | 13 | `POST /chat/voice` | ✔ | Send a voice recording → transcript + reply |
 | 14 | `GET /api/resources` | ✔ | List self‑help guides & exercises |
 | 15 | `GET /api/resources/{id}` | ✔ | One guide: info text + steps + reference link |
@@ -132,13 +133,16 @@ Response `200`: `{ "id": "uuid", "email": "…", "role": "user" }`
 ### 6) GET `/sessions` — auth
 Response `200`:
 ```json
-{ "sessions": [ { "sessionID": "uuid", "title": "Hi today…", "createdAt": "2026-06-27T09:54:09Z" } ] }
+{ "sessions": [ { "sessionID": "uuid", "title": "Hi today…", "mode": "multi", "createdAt": "2026-06-27T09:54:09Z" } ] }
 ```
-(newest first)
+(newest first) · `mode` is `"multi"` (normal) or `"experiment"` (supervised — see §11b/§12).
 
 ### 7) POST `/sessions` — auth
-Request (optional): `{ "title": "New chat" }`
-Response `201`: `{ "sessionID": "uuid", "title": "New chat", "createdAt": "…" }`
+Request (optional): `{ "title": "New chat", "mode": "multi" }`
+- `mode`: `"multi"` (default, instant bot replies) or `"experiment"` — every reply
+  in the chat is reviewed live by a counsellor before the user sees it.
+Response `201`: `{ "sessionID": "uuid", "title": "New chat", "mode": "multi", "createdAt": "…" }`
+Errors: `400` (invalid mode).
 
 ### 8) PATCH `/sessions/{id}` — auth
 Request: `{ "title": "New name" }` (1–80 chars)
@@ -154,14 +158,18 @@ Response `200`:
 {
   "turns": [
     {
+      "messageID": "uuid",
       "question": "Hi today I feel stress",
+      "status": "delivered",
       "reply": { "reply": "That sounds like a lot…", "escalated": false },
       "created_at": "2026-06-27T09:54:10Z"
     }
   ]
 }
 ```
-`reply` is `null` if that turn has no reply yet. `403` if not yours.
+`status` is `"delivered"` or `"pending"` (experiment mode: the reply is still with
+the counsellor — `reply` is `null`; show a waiting indicator and poll §11b).
+`403` if not yours.
 
 ### 11) GET `/sessions/{id}/analysis` — auth
 Response `200`:
@@ -180,11 +188,31 @@ Response `200`:
 }
 ```
 
-### 12) POST `/chat` — auth · rate‑limited 20/min
-Request: `{ "sessionID": "uuid", "message": "text (≤2000 chars)" }`
+### 11b) GET `/sessions/{id}/pending` — auth · rate‑limited 40/min
+Experiment mode only: poll this (~every 3 s) while any turn is awaiting review.
 Response `200`:
 ```json
+{ "messages": [
+  { "messageID": "uuid", "status": "pending" },
+  { "messageID": "uuid", "status": "delivered",
+    "reply": "…counsellor-approved reply…", "emotion": "Stress",
+    "confidence": 0.55, "escalated": false }
+] }
+```
+Swap each waiting indicator for its reply when its entry turns `"delivered"`;
+stop polling when nothing is `"pending"`. (The API never reveals whether the
+counsellor approved the bot's draft or replaced it.)
+
+### 12) POST `/chat` — auth · rate‑limited 20/min
+Request: `{ "sessionID": "uuid", "message": "text (≤2000 chars)" }`
+Response `200` (normal `multi` session):
+```json
 { "messageID": "uuid", "reply": "…bot reply…", "emotion": "Stress", "confidence": 0.55, "escalated": false }
+```
+Response `200` (**experiment session** — the reply is held for counsellor review;
+show a waiting indicator and poll §11b):
+```json
+{ "messageID": "uuid", "status": "pending" }
 ```
 `escalated:true` means a crisis response was returned instead of a normal reply.
 Errors: `400` (missing fields / message too long), `403` (invalid session).
@@ -389,7 +417,10 @@ Future<Map<String, dynamic>> sendVoice(String sessionId, List<int> audioBytes) a
   client only needs `role` to know the user type. Its API (all under
   `/api/admin/*`, staff-guarded): `stats`, `emotions`, `sessions`,
   `sessions/{id}`, `sessions/{id}/export` (JSON download),
-  `messages/{id}/feedback` (staff rating 1–5 + feedback on a bot reply), and
-  the admin-only `staff` account management. **Admins create staff accounts by
+  `messages/{id}/feedback` (staff rating 1–5 + feedback on a bot reply),
+  `live-sessions` + `sessions/{id}/rename` + `review/{messageID}`
+  (experiment-mode live counselling: connect to a user's chat, approve/edit
+  pending drafts — an edit records the draft as rejected), and the admin-only
+  `staff` account management. **Admins create staff accounts by
   email** on the dashboard. Only the first admin is made via SQL:
   `update public.profiles set role = 'admin' where email = '…';`

@@ -8,11 +8,43 @@ const CHAT_PLACEHOLDER = "Ask something below to start the conversation.";
 let sessions = [];
 let sessionID = null; // created lazily on the first message (fresh chat per login)
 
+/* ---- Experiment mode (supervised live counselling) ----
+   In an experiment chat the pipeline's reply is held for a counsellor to
+   approve/edit; the user sees a "being reviewed…" bubble and this page polls
+   /sessions/<id>/pending every few seconds until the reply is delivered. */
+let experimentMode = false;             // toggle value, consumed at session creation
+let currentMode = "multi";              // mode of the open session
+let composerLocked = false;             // locked while a turn awaits review
+const waitingBubbles = new Map();       // messageID -> waiting bubble element
+let pollTimer = null;
+let pollInFlight = false;
+const POLL_MS = 3000;
+
 if (requireAuth()) {
   // Establish the blank chat synchronously before the async session list loads,
   // so an early send can't be clobbered by the late /sessions response.
   startBlank();
   loadSessions();
+}
+
+function setExperimentMode(checked) {
+  experimentMode = checked;
+}
+
+function updateModeUI() {
+  // The toggle only matters before the chat exists; the badge marks the mode.
+  $("modeToggle").classList.toggle("hidden", sessionID !== null);
+  $("modeBadge").classList.toggle("hidden", currentMode !== "experiment");
+}
+
+function setComposerLocked(locked) {
+  composerLocked = locked;
+  $("message").disabled = locked;
+  $("sendBtn").disabled = locked;
+  $("voiceBtn").disabled = locked;
+  $("message").placeholder = locked
+    ? "Waiting for the counsellor to review the reply…"
+    : "Type your message…";
 }
 
 /* ===================== SESSIONS ===================== */
@@ -30,6 +62,13 @@ async function loadSessions() {
 function startBlank() {
   sessionID = null;
   localStorage.removeItem("sessionID");
+  currentMode = "multi";
+  experimentMode = false;
+  $("experimentChk").checked = false;
+  stopPolling();
+  waitingBubbles.clear();
+  setComposerLocked(false);
+  updateModeUI();
   renderSessionList();
   clearPanels();
   $("currentSessionTitle").textContent = "New chat";
@@ -38,13 +77,19 @@ function startBlank() {
 async function createSession(title) {
   const r = await api("/sessions", {
     method: "POST",
-    body: JSON.stringify({ title: title || "New chat" }),
+    body: JSON.stringify({
+      title: title || "New chat",
+      mode: experimentMode ? "experiment" : "multi",
+    }),
   });
   if (r.error) return false;
   sessionID = r.sessionID;
   setSessionID(sessionID);
-  sessions.unshift({ sessionID: r.sessionID, title: r.title, createdAt: r.createdAt });
+  currentMode = r.mode || "multi";
+  sessions.unshift({ sessionID: r.sessionID, title: r.title, mode: r.mode,
+                     createdAt: r.createdAt });
   $("currentSessionTitle").textContent = r.title || "New chat";
+  updateModeUI();
   renderSessionList();
   return true;
 }
@@ -59,7 +104,8 @@ function renderSessionList() {
     <div class="session-item ${s.sessionID === sessionID ? "active" : ""}"
          onclick="openSession('${s.sessionID}', true)">
       <div class="s-title">${escapeHTML(s.title || "New chat")}</div>
-      <div class="s-date">${escapeHTML(fmtDate(s.createdAt))}</div>
+      <div class="s-date">${escapeHTML(fmtDate(s.createdAt))}${s.mode === "experiment"
+        ? ' · <span class="s-supervised">supervised</span>' : ""}</div>
       <div class="s-actions">
         <button onclick="event.stopPropagation(); renamePrompt('${s.sessionID}')">Rename</button>
         <button onclick="event.stopPropagation(); deleteSession('${s.sessionID}')">Delete</button>
@@ -75,15 +121,32 @@ async function newChat() {
 async function openSession(id, fromClick) {
   sessionID = id;
   setSessionID(id);
+  stopPolling();
+  waitingBubbles.clear();
   const s = sessions.find((x) => x.sessionID === id);
+  currentMode = (s && s.mode) || "multi";
   $("currentSessionTitle").textContent = s ? (s.title || "New chat") : "Chat";
+  updateModeUI();
   renderSessionList();
   clearPanels();
   const r = await api(`/sessions/${id}/messages`);
+  if (sessionID !== id) return; // user already switched away
   const turns = (r && r.turns) || [];
   for (const t of turns) {
     appendUser(t.question);
-    if (t.reply) $("chatPanel").appendChild(answerBubble(t.reply));
+    if (t.status === "pending") {
+      $("chatPanel").appendChild(waitingBubble(t.messageID));
+    } else if (t.reply) {
+      $("chatPanel").appendChild(answerBubble(t.reply));
+    }
+  }
+  // Resume supervision state: still-pending turns keep the composer locked
+  // and restart the poll loop.
+  if (waitingBubbles.size) {
+    setComposerLocked(true);
+    startPolling();
+  } else {
+    setComposerLocked(false);
   }
   scrollPanels();
   if (fromClick && isMobileViewport()) closeSidebar();
@@ -134,7 +197,7 @@ async function maybeAutoTitle(firstMessage) {
 let sending = false;
 
 async function send() {
-  if (sending) return; // a reply is pending; the typed text stays in the box
+  if (sending || composerLocked) return; // typed text stays in the box
   const ta = $("message");
   const message = ta.value.trim();
   if (!message) return;
@@ -163,12 +226,63 @@ async function send() {
       scrollPanels();
       return;
     }
+    if (r.status === "pending") {
+      // Experiment mode: the reply is with the counsellor. Wait + poll.
+      load.replaceWith(waitingBubble(r.messageID));
+      scrollPanels();
+      maybeAutoTitle(message);
+      setComposerLocked(true);
+      startPolling();
+      return;
+    }
     load.replaceWith(answerBubble(r));
     scrollPanels();
     maybeAutoTitle(message);
   } finally {
     sending = false;
-    $("sendBtn").disabled = false;
+    $("sendBtn").disabled = composerLocked; // don't undo the review lock
+  }
+}
+
+/* ---------- experiment-mode waiting + polling ---------- */
+function waitingBubble(messageID) {
+  const div = botBubble(
+    `<span class="placeholder">Being reviewed by a counsellor<span class="dots"></span></span>`,
+    "waiting-review");
+  waitingBubbles.set(messageID, div);
+  return div;
+}
+
+function startPolling() {
+  if (!pollTimer) pollTimer = setInterval(pollPending, POLL_MS);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  pollInFlight = false;
+}
+
+async function pollPending() {
+  if (pollInFlight || !sessionID) return;
+  pollInFlight = true;
+  const sid = sessionID;
+  try {
+    const r = await api(`/sessions/${sid}/pending`);
+    if (sid !== sessionID) return;         // user switched chats mid-request
+    if (r.error) { stopPolling(); return; } // 401 already redirected by api()
+    for (const m of r.messages || []) {
+      if (m.status === "delivered" && waitingBubbles.has(m.messageID)) {
+        waitingBubbles.get(m.messageID).replaceWith(answerBubble(m));
+        waitingBubbles.delete(m.messageID);
+        scrollPanels();
+      }
+    }
+    if (!waitingBubbles.size) {
+      stopPolling();
+      setComposerLocked(false);
+    }
+  } finally {
+    pollInFlight = false;
   }
 }
 
@@ -336,6 +450,15 @@ async function sendVoice() {
   if (r.transcript) {
     const bubble = load.previousElementSibling?.querySelector(".bubble");
     if (bubble) bubble.textContent = r.transcript;
+  }
+  if (r.status === "pending") {
+    // Experiment mode: the reply is with the counsellor. Wait + poll.
+    load.replaceWith(waitingBubble(r.messageID));
+    scrollPanels();
+    if (r.transcript) maybeAutoTitle(r.transcript);
+    setComposerLocked(true);
+    startPolling();
+    return;
   }
   load.replaceWith(answerBubble(r));
   scrollPanels();

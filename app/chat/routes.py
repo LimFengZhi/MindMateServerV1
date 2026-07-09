@@ -37,10 +37,12 @@ def chat():
         return json_error("sessionID and message required", 400)
     if len(message) > MAX_MESSAGE_LEN:
         return json_error("message too long", 400)
-    if not get_owned_session(session_id):
+    session = get_owned_session(session_id)
+    if not session:
         return json_error("invalid session", 403)
 
-    return jsonify(answer(g.user["id"], session_id, message))
+    return jsonify(answer(g.user["id"], session_id, message,
+                          mode=session.get("mode") or "multi"))
 
 
 # ---------------- Voice chat ----------------
@@ -76,7 +78,8 @@ def chat_voice():
     session_id = (request.form.get("sessionID") or "").strip()
     if not session_id:
         return json_error("sessionID required", 400)
-    if not get_owned_session(session_id):
+    session = get_owned_session(session_id)
+    if not session:
         return json_error("invalid session", 403)
 
     if not voice_agent.available:
@@ -95,6 +98,7 @@ def chat_voice():
     if not message:
         return json_error("could not transcribe audio", 422)
 
-    payload = answer(g.user["id"], session_id, message)
+    payload = answer(g.user["id"], session_id, message,
+                     mode=session.get("mode") or "multi")
     payload["transcript"] = message
     return jsonify(payload)

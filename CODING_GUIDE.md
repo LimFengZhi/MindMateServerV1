@@ -21,10 +21,10 @@ makes admin changes impossible to leak into user-facing behavior.
 |---|---|
 | `app/admin/routes.py` | Admin pages (`/admin/...`) and JSON API (`/api/admin/...`). **Every** API route carries `@staff_required` or `@admin_required`. |
 | `app/admin/service.py` | Admin-side orchestration (e.g. creating staff accounts via Supabase's auth admin API). |
-| `app/db/admin_repo.py` | **All** admin database queries. Never put them in `repo.py`, and never call `repo.py`'s user-scoped functions with another user's id. |
+| `app/db/admin_repo.py` | **All** admin database queries — including aggregation/shaping (e.g. `get_test_analytics`), so routes stay thin. Editor writes go through the `_attempt` helper (bool result → generic 500 via `_write_response` in routes). Never put admin queries in `repo.py`, and never call `repo.py`'s user-scoped functions with another user's id. |
 | `app/templates/admin/` | Admin Jinja pages (dashboard, staff login, test benches). Extend `base.html` directly (not `app_base.html` — that's the user shell with the user sidebar). |
-| `app/static/js/admin/` | Admin page scripts. May use the shared helpers from `common.js` (`api()`, `escapeHTML`, `$`, placeholders). Staff-specific shared code (role guard, feedback controls, export) lives in `review_helpers.js` — load it before the page's own script. |
-| `app/static/css/admin.css` | Admin-only styles, layered **on top of** `style.css`. New admin styles go here, not in `style.css`. |
+| `app/static/js/admin/` | Admin page scripts. May use the shared helpers from `common.js` (`api()`, `escapeHTML`, `$`, placeholders). Staff-specific shared code (role guard, feedback controls, export) lives in `review_helpers.js` — load it before the page's own script. Dashboard editor screens reuse the helpers in `admin.js`: `setMsg` (status lines), `submitAndRefresh` (busy → save → ok/error → reload), `toggleEditor` (list ↔ form swap), `showApiError`. |
+| `app/static/css/admin.css` | Admin-only styles, layered **on top of** `style.css`. New admin styles go here, not in `style.css` — and not as inline `style="…"` in JS-generated markup: reuse the utility classes (`.dash-card`, `.dash-stack`, `.flex-between`, `.data-label`, `.pager`, `.band-*`, `.stat-mini`) or add a class. |
 
 ### Shared files admin work may touch — but only in the marked way
 
@@ -78,6 +78,16 @@ makes admin changes impossible to leak into user-facing behavior.
    with their own token), so the pipeline is exercised exactly as users
    experience it — don't replace that with a parallel admin chat endpoint.
    Only the review/export extras go through `/api/admin/*`.
+9. **Experiment mode is a sanctioned cross-wing feature.** The user wing owns
+   creating experiment sessions, holding drafts (`status='pending'`), and the
+   `GET /sessions/<id>/pending` poll; the admin wing owns the Review Queue, and
+   pending drafts are resolved ONLY through
+   `admin_repo.resolve_pending_message` (its conditional update is the
+   double-review race guard). Never expose `draft_reply` or the
+   approved/rejected distinction through a user-facing endpoint. The one-time
+   messages-table rebuild in schema.sql was a deliberate exception to the
+   append-only rule. Any new polling endpoint must carry its own
+   `@limiter.limit` (the global 300/hour default breaks poll loops).
 
 ## 4. User-side rules (the mirror image)
 

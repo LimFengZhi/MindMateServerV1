@@ -6,15 +6,18 @@ caller doesn't own and exposes the row as g.session.
 from flask import Blueprint, request, jsonify, g
 
 from app.auth.decorators import login_required, session_required
+from app.chat.routes import user_or_ip
 from app.db.repo import (
     create_session, list_sessions, rename_session, delete_session,
-    get_transcript, get_analysis,
+    get_transcript, get_analysis, get_pending_status,
 )
+from app.extensions import limiter
 from app.http_utils import json_error
 
 sessions_bp = Blueprint("sessions", __name__, url_prefix="/sessions")
 
 MAX_TITLE_LEN = 80
+SESSION_MODES = {"multi", "experiment"}
 
 
 def _public(session):
@@ -22,6 +25,7 @@ def _public(session):
     return {
         "sessionID": session["id"],
         "title": session.get("title", "New chat"),
+        "mode": session.get("mode") or "multi",
         "createdAt": session.get("created_at"),
     }
 
@@ -38,7 +42,10 @@ def list_my_sessions():
 def new_session():
     data = request.get_json(silent=True) or {}
     title = (data.get("title") or "New chat").strip()[:MAX_TITLE_LEN] or "New chat"
-    session = create_session(g.user["id"], title=title)
+    mode = (data.get("mode") or "multi").strip()
+    if mode not in SESSION_MODES:
+        return json_error("mode must be 'multi' or 'experiment'", 400)
+    session = create_session(g.user["id"], title=title, mode=mode)
     return jsonify(_public(session)), 201
 
 
@@ -66,6 +73,14 @@ def delete_my_session(session_id):
 @session_required
 def session_messages(session_id):
     return jsonify({"turns": get_transcript(g.user["id"], session_id)})
+
+
+@sessions_bp.get("/<session_id>/pending")
+@session_required
+@limiter.limit("40 per minute", key_func=user_or_ip)  # chat polls every ~3s
+def session_pending(session_id):
+    """Experiment-mode poll: the review state of this chat's supervised turns."""
+    return jsonify({"messages": get_pending_status(g.user["id"], session_id)})
 
 
 @sessions_bp.get("/<session_id>/analysis")

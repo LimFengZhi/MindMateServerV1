@@ -70,9 +70,25 @@ def run_multi(user_id, session_id, message, diag=None):
     }
 
 
-def answer(user_id, session_id, message):
-    """Run the pipeline, persist the turn, and return the API payload."""
+def answer(user_id, session_id, message, mode="multi"):
+    """Run the pipeline, persist the turn, and return the API payload.
+
+    mode='multi' (normal): the reply is stored and returned immediately.
+    mode='experiment' (supervised): the pipeline output is held as a PENDING
+    draft that a staff psychologist must approve/edit before the user sees a
+    reply — including crisis escalations (held by design; the review queue
+    pins them first). The payload deliberately leaks nothing about the draft.
+    """
     result = run_multi(user_id, session_id, message)
+
+    if mode == "experiment":
+        row = add_message(
+            user_id, session_id, message, None,
+            emotion=result["emotion"], confidence=result["confidence"],
+            escalated=result["escalated"], summary=result.get("summary"),
+            status="pending", draft_reply=result["reply"],
+        )
+        return {"messageID": row["id"], "status": "pending"}
 
     row = add_message(
         user_id, session_id, message, result["reply"],

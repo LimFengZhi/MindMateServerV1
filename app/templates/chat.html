@@ -5,6 +5,7 @@
 
 {% block topbar_title %}
   <strong id="currentSessionTitle" class="topbar-title">Chat</strong>
+  <span id="modeBadge" class="tag experiment hidden">supervised</span>
 {% endblock %}
 
 {% block main %}
@@ -17,6 +18,14 @@
       </section>
     </div>
   </main>
+
+  <!-- Shown only before the chat's first message; the choice is fixed after that. -->
+  <div id="modeToggle" class="mode-toggle">
+    <label>
+      <input id="experimentChk" type="checkbox" onchange="setExperimentMode(this.checked)" />
+      <span>Experiment mode — every reply is reviewed live by a counsellor before you see it</span>
+    </label>
+  </div>
 
   <footer id="composer">
     <textarea id="message" rows="1" placeholder="Type your message…"

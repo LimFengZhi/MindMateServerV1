@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Live Counselling{% endblock %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}" />
+{% endblock %}
+
+{% block body %}
+  <div class="admin-wrap">
+    <header class="topbar">
+      <a class="btn btn-ghost" href="/admin">← Dashboard</a>
+      <strong class="topbar-title">Live Counselling — experiment chats</strong>
+      <div class="admin-topbar-right">
+        <span id="adminEmail" class="muted"></span>
+        <button class="btn btn-ghost" onclick="logout()"><span>⎋</span> Logout</button>
+      </div>
+    </header>
+
+    <div class="test-layout">
+      <aside class="test-sidebar">
+        <div class="side-label">Users</div>
+        <p class="muted lv-hint">Take charge of up to 2 users. Then pick one of
+          their live sessions to watch — replies wait for your approval.</p>
+        <div id="liveSessionList" class="session-list"><p class="placeholder">Loading…</p></div>
+      </aside>
+
+      <div class="live-main">
+        <div id="livePanels" class="live-grid">
+          <p class="placeholder lv-empty">Select a user on the left to take charge.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin/review_helpers.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin/live.js') }}"></script>
+{% endblock %}

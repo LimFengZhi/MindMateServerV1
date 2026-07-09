@@ -20,6 +20,7 @@
 
     <nav class="admin-nav">
       <button class="chip active" id="nav-overview" onclick="switchView('overview')">📊 Overview</button>
+      <button class="chip" onclick="location.href='/admin/live'">🟢 Live Counselling</button>
       <button class="chip" id="nav-emotions" onclick="switchView('emotions')">💭 Emotion Analysis</button>
       <button class="chip" id="nav-sessions" onclick="switchView('sessions')">💬 User Sessions</button>
       <button class="chip" id="nav-testing" onclick="switchView('testing')">🧪 Testing</button>
@@ -58,7 +59,6 @@
 
           <div class="section-card">
 
-            <!-- Container A: The Tests List Grid -->
             <div id="test-list-container">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                 <p class="muted" style="margin:0;">Select a test to edit, or add a new one.</p>
@@ -72,7 +72,6 @@
               </div>
             </div>
 
-            <!-- Container B: The Test Editor Form (Hidden by default) -->
             <div id="test-form-container" class="hidden">
               <div style="display: flex; gap: 10px; margin-bottom: 20px; align-items: center;">
                 <button class="btn btn-ghost" onclick="closeTestEditor()">← Back to List</button>
@@ -84,19 +83,16 @@
 
                 <div style="display: flex; flex-direction: column; gap: 18px; width: 100%;">
 
-                  <!-- Row 1: Title -->
                   <div style="width: 100%;">
                     <label class="stat-label" style="display:block; margin-bottom: 6px;">Assessment Title</label>
                     <input type="text" id="edit-test-title" class="dash-input" style="width: 100%; box-sizing: border-box;" placeholder="e.g., PHQ-9 Depression Screener" required />
                   </div>
 
-                  <!-- Row 2: Description -->
                   <div style="width: 100%;">
                     <label class="stat-label" style="display:block; margin-bottom: 6px;">Description / Instructions</label>
                     <textarea id="edit-test-description" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 70px;" placeholder="Instructions shown to the user before starting..."></textarea>
                   </div>
 
-                  <!-- Row 3: Questions (JSON Format) -->
                   <div style="width: 100%;">
                     <label class="stat-label" style="display:block; margin-bottom: 6px;">Questions (JSON Array)</label>
                     <textarea id="edit-test-questions" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 180px; font-family: monospace;" placeholder='[{"q": "Feeling down, depressed, or hopeless?", "options": ["Not at all", "Several days", "More than half the days", "Nearly every day"]}]'></textarea>
@@ -104,7 +100,6 @@
 
                 </div>
 
-                <!-- Form Footer Utilities -->
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 14px;">
                   <p id="testFormMsg" class="auth-msg" style="margin: 0;"></p>
 
@@ -234,7 +229,6 @@
           <h2>System Datasets</h2>
           <p class="muted">View training datasets below.</p>
 
-          <!-- Internal sub-navigation tabs -->
           <div class="chip-row" style="margin-bottom: 16px;">
             <button class="chip active" id="btn-sub-chatbot" onclick="switchDatasetTab('chatbot')">💬 Chat Bot Dataset</button>
             <button class="chip" id="btn-sub-classifier" onclick="switchDatasetTab('classifier')">🏷️ Classifier Dataset</button>

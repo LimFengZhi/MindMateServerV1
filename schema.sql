@@ -79,23 +79,53 @@ create table if not exists public.sessions (
 create index if not exists idx_sessions_user on public.sessions(user_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
--- messages: one conversation turn per row (the user's question + the
--- multi-agent reply + the diagnostic metadata). Flattened from the old
--- Firestore queries/responses subcollections for simplicity.
+-- messages v2: one conversation turn per row, redesigned for experiment mode
+-- (supervised live counselling).
+--
+--   draft_reply  what the multi-agent pipeline generated (in normal chats it
+--                equals reply; in experiment chats it is the reviewed draft)
+--   reply        what the USER sees; NULL while a turn awaits review
+--   status       'delivered' normal chat, instant reply (terminal)
+--                'pending'   experiment chat, awaiting staff review
+--                'approved'  staff delivered the draft verbatim (terminal)
+--                'rejected'  staff replaced the draft with their own reply;
+--                            reply = staff text, draft_reply keeps the
+--                            rejected original (terminal)
+--   reviewed_by / reviewed_at  which staff member resolved it, and when
+--
+-- The one-time DO block below REBUILDS the table (drops all old rows) when it
+-- detects the pre-experiment shape (no `status` column). This data loss is
+-- deliberate and accepted; the block no-ops on databases already migrated.
 -- ---------------------------------------------------------------------------
+do $$ begin
+    if exists (select 1 from information_schema.columns
+               where table_schema = 'public' and table_name = 'messages')
+       and not exists (select 1 from information_schema.columns
+               where table_schema = 'public' and table_name = 'messages'
+                 and column_name = 'status') then
+        drop table public.messages;   -- old shape -> rebuild below
+    end if;
+end $$;
+
 create table if not exists public.messages (
     id                 uuid primary key default gen_random_uuid(),
     session_id         uuid not null references public.sessions(id) on delete cascade,
     user_id            uuid not null references auth.users(id) on delete cascade,
     question           text not null,
+    draft_reply        text,
     reply              text,
+    status             text not null default 'delivered'
+                       check (status in ('delivered', 'pending', 'approved', 'rejected')),
+    reviewed_by        uuid references auth.users(id) on delete set null,
+    reviewed_at        timestamptz,
     emotion            text,
     emotion_confidence real,
     escalated          boolean not null default false,
     summary            text,
-    -- Feedback on the reply (rating 1-5 + free text + who gave it). Not used by
-    -- this app yet; the columns are here for a future feedback feature.
-    rating             smallint,
+    -- Staff feedback on the reply (rating 1-5 + free text + who gave it),
+    -- written by the staff review tools (/api/admin).
+    rating             smallint constraint messages_rating_range
+                       check (rating is null or rating between 1 and 5),
     feedback           text,
     feedback_by        uuid references auth.users(id) on delete set null,
     feedback_at        timestamptz,
@@ -103,18 +133,21 @@ create table if not exists public.messages (
 );
 
 create index if not exists idx_messages_session on public.messages(session_id, created_at);
+-- The staff review queue reads pending turns crisis-first, oldest-first.
+create index if not exists idx_messages_pending
+    on public.messages (escalated desc, created_at) where status = 'pending';
 
--- Additive (idempotent) for databases created before the feedback columns existed.
-alter table public.messages add column if not exists rating smallint;
-alter table public.messages add column if not exists feedback text;
-alter table public.messages add column if not exists feedback_by uuid references auth.users(id) on delete set null;
-alter table public.messages add column if not exists feedback_at timestamptz;
-do $$ begin
-    if not exists (select 1 from pg_constraint where conname = 'messages_rating_range') then
-        alter table public.messages
-            add constraint messages_rating_range check (rating is null or rating between 1 and 5);
-    end if;
-end $$;
+-- Recreate RLS for databases where the DO block dropped the table.
+alter table public.messages enable row level security;
+drop policy if exists messages_own on public.messages;
+create policy messages_own on public.messages
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Sessions carry the chat mode: 'multi' = normal instant replies,
+-- 'experiment' = supervised (every reply reviewed by staff before delivery).
+alter table public.sessions drop constraint if exists sessions_mode_check;
+alter table public.sessions add constraint sessions_mode_check
+    check (mode in ('multi', 'experiment'));
 
 -- ---------------------------------------------------------------------------
 -- resources: mental-health info cards. Each has an info body (one tab) and a
