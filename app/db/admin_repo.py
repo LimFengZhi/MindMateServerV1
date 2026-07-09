@@ -11,6 +11,18 @@ from app.db.repo import APIError, _none_if_bad_uuid
 from app.extensions import get_sb
 
 
+def _retry_once(call):
+    """Supabase's pooled HTTP connections can die while idle (httpx 'server
+    disconnected' errors); one immediate retry runs on a fresh connection.
+    Real Postgres errors (APIError) are never retried."""
+    try:
+        return call()
+    except APIError:
+        raise
+    except Exception:
+        return call()
+
+
 def _count(table, **filters):
     q = get_sb().table(table).select("id", count="exact").limit(1)
     for column, value in filters.items():
@@ -55,7 +67,8 @@ def get_emotion_overview():
 # Session review (staff): list every session, read one transcript
 # ---------------------------------------------------------------------------
 def _emails_by_user():
-    rows = (get_sb().table("profiles").select("id, email").execute()).data or []
+    rows = (_retry_once(lambda: get_sb().table("profiles")
+                        .select("id, email").execute())).data or []
     return {p["id"]: p.get("email") for p in rows}
 
 
@@ -89,24 +102,24 @@ def list_all_sessions():
 def get_session_review(session_id):
     """One session's transcript with diagnostic + feedback fields, or None."""
     try:
-        res = (get_sb().table("sessions")
-               .select("id, user_id, title, mode, created_at")
-               .eq("id", session_id)
-               .limit(1)
-               .execute())
+        res = _retry_once(lambda: get_sb().table("sessions")
+                          .select("id, user_id, title, mode, created_at")
+                          .eq("id", session_id)
+                          .limit(1)
+                          .execute())
     except APIError as e:
         return _none_if_bad_uuid(e)
     if not res.data:
         return None
     s = res.data[0]
     emails = _emails_by_user()
-    msgs = (get_sb().table("messages")
-            .select("id, question, reply, draft_reply, status, reviewed_at, "
-                    "emotion, emotion_confidence, escalated, rating, feedback, "
-                    "created_at")
-            .eq("session_id", session_id)
-            .order("created_at", desc=False)
-            .execute()).data or []
+    msgs = (_retry_once(lambda: get_sb().table("messages")
+                        .select("id, question, reply, draft_reply, status, reviewed_at, "
+                                "emotion, emotion_confidence, escalated, rating, feedback, "
+                                "created_at")
+                        .eq("session_id", session_id)
+                        .order("created_at", desc=False)
+                        .execute())).data or []
     return {
         "session": {
             "sessionID": s["id"],
@@ -138,15 +151,15 @@ def get_session_review(session_id):
 def list_experiment_sessions():
     """Every experiment-mode session with its owner email, message count and
     how many turns still await review — the 'choose a user to connect' list."""
-    sessions = (get_sb().table("sessions")
-                .select("id, user_id, title, created_at")
-                .eq("mode", "experiment")
-                .order("created_at", desc=True)
-                .execute()).data or []
+    sessions = (_retry_once(lambda: get_sb().table("sessions")
+                            .select("id, user_id, title, created_at")
+                            .eq("mode", "experiment")
+                            .order("created_at", desc=True)
+                            .execute())).data or []
     emails = _emails_by_user()
-    msgs = (get_sb().table("messages")
-            .select("session_id, status")
-            .execute()).data or []
+    msgs = (_retry_once(lambda: get_sb().table("messages")
+                        .select("session_id, status")
+                        .execute())).data or []
     counts, pending = {}, {}
     for m in msgs:
         sid = m["session_id"]
@@ -187,11 +200,11 @@ def resolve_pending_message(message_id, reviewer_id, edited_reply=None):
     can't both win — the loser's update matches zero rows.
     """
     try:
-        res = (get_sb().table("messages")
-               .select("id, status, draft_reply")
-               .eq("id", message_id)
-               .limit(1)
-               .execute())
+        res = _retry_once(lambda: get_sb().table("messages")
+                          .select("id, status, draft_reply")
+                          .eq("id", message_id)
+                          .limit(1)
+                          .execute())
     except APIError as e:
         return ("not_found", _none_if_bad_uuid(e))
     if not res.data:
@@ -209,13 +222,24 @@ def resolve_pending_message(message_id, reviewer_id, edited_reply=None):
     update["reviewed_by"] = reviewer_id
     update["reviewed_at"] = datetime.now(timezone.utc).isoformat()
 
-    upd = (get_sb().table("messages")
-           .update(update)
-           .eq("id", message_id)
-           .eq("status", "pending")   # the race guard
-           .execute())
+    upd = _retry_once(lambda: get_sb().table("messages")
+                      .update(update)
+                      .eq("id", message_id)
+                      .eq("status", "pending")   # the race guard
+                      .execute())
     if not upd.data:
-        return ("conflict", row)
+        # Zero rows: another staff member won the race — OR our first attempt
+        # committed and only its response was lost before the retry. Check who
+        # actually reviewed it before calling it a conflict.
+        check = _retry_once(lambda: get_sb().table("messages")
+                            .select("id, status, reply, reviewed_by")
+                            .eq("id", message_id)
+                            .limit(1)
+                            .execute())
+        settled = check.data[0] if check.data else None
+        if settled and settled.get("reviewed_by") == reviewer_id:
+            return ("ok", settled)
+        return ("conflict", settled or row)
     return ("ok", upd.data[0])
 
 

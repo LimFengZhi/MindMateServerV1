@@ -144,10 +144,20 @@ def _register_error_handlers(app):
 
     # Any unhandled exception (e.g. a transient Supabase error) -> clean JSON
     # so the front-end's api() helper always gets parseable output.
+    _TRANSIENT_ERRORS = {
+        # httpx transport failures from a dropped Supabase connection: the
+        # request is safe to retry, so say that instead of "internal error".
+        "RemoteProtocolError", "ReadError", "WriteError", "ConnectError",
+        "ReadTimeout", "ConnectTimeout", "PoolTimeout",
+    }
+
     @app.errorhandler(Exception)
     def on_error(e):
         from werkzeug.exceptions import HTTPException
         if isinstance(e, HTTPException):
             return json_error(e.description, e.code)
+        if type(e).__name__ in _TRANSIENT_ERRORS:
+            app.logger.warning("Transient DB connection error: %r", e)
+            return json_error("temporary connection problem — please try again", 503)
         app.logger.exception("Unhandled error")
         return json_error("internal server error", 500)
