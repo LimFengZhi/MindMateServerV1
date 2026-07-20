@@ -303,7 +303,8 @@ def delete_resource(resource_id):
                     .delete().eq("id", resource_id).execute())
 
 
-# Prompts are keyed by their `name` column (the editor passes names as ids).
+# Prompts are keyed by their `key` column (the editor passes keys as ids) —
+# the same identifier the app's prompt loader resolves ('composed', 'summarise').
 def list_prompts():
     return (get_sb().table("prompts").select("*").execute()).data or []
 
@@ -311,10 +312,10 @@ def list_prompts():
 def create_prompt(name, content):
     """Returns (ok, error_message) so a duplicate name gets a clear message."""
     try:
-        existing = get_sb().table("prompts").select("name").eq("name", name).execute()
+        existing = get_sb().table("prompts").select("key").eq("key", name).execute()
         if existing.data:
             return False, "A prompt with this name already exists."
-        get_sb().table("prompts").insert({"name": name, "content": content}).execute()
+        get_sb().table("prompts").insert({"key": name, "content": content}).execute()
         return True, None
     except Exception as e:
         return False, str(e)
@@ -322,12 +323,12 @@ def create_prompt(name, content):
 
 def update_prompt(name, content):
     return _attempt(lambda: get_sb().table("prompts")
-                    .update({"content": content}).eq("name", name).execute())
+                    .update({"content": content}).eq("key", name).execute())
 
 
 def delete_prompt(name):
     return _attempt(lambda: get_sb().table("prompts")
-                    .delete().eq("name", name).execute())
+                    .delete().eq("key", name).execute())
 
 
 def list_agreements():

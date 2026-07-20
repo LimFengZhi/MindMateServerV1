@@ -496,10 +496,10 @@ async function loadPromptsData() {
     return;
   }
   container.innerHTML = `<div class="dash-stack">` + r.data.map((prompt) => {
-    const promptId = prompt.name || prompt.id;
+    const promptId = prompt.key || prompt.id;
     return `
       <div class="dash-card">
-        <h4>Prompt: ${escapeHTML(prompt.name)}</h4>
+        <h4>Prompt: ${escapeHTML(prompt.key)}</h4>
         <textarea id="prompt-content-${promptId}" class="dash-textarea code-area">${escapeHTML(prompt.content)}</textarea>
         <div class="flex-between">
           <p id="prompt-msg-${promptId}" class="auth-msg no-margin"></p>

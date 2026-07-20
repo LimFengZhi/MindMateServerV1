@@ -1,39 +1,100 @@
 -- ===========================================================================
--- MindMate — Supabase schema
+-- MindMate — Supabase schema (FULL RESET script)
 --
--- Run this ONCE in the Supabase SQL Editor (Dashboard -> SQL -> New query).
--- It is idempotent: re-running it will not error or duplicate data.
+-- ⚠️⚠️  DESTRUCTIVE — READ BEFORE RUNNING  ⚠️⚠️
+-- Running this script WIPES THE ENTIRE APP DATABASE:
+--   • drops every app table (all chats, messages, test attempts, resources…)
+--   • DELETES EVERY USER ACCOUNT from Supabase Auth (auth.users)
+-- and then recreates everything from scratch. This is the intended workflow:
+-- every schema change = edit this file, rerun it, start with a clean slate.
 --
--- After this, start the app (python run.py). On first boot it auto-seeds the
--- user agreement + sample resources (see db/seed.py).
+-- Run it in the Supabase SQL Editor (Dashboard -> SQL -> New query).
+--
+-- After a reset:
+--   1. python run.py            -> auto-reseeds agreement, prompts, self-tests
+--   2. python scripts/scrape_resources.py  -> re-uploads the Resources content
+--   3. Register your admin account in the app, verify the email, then promote
+--      it (see the commented UPDATE at the bottom of this file).
 -- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 0. Teardown: drop all app objects, then wipe every auth account.
+-- ---------------------------------------------------------------------------
+drop trigger if exists on_auth_user_created on auth.users;
+
+-- Tables first: dropping them (cascade) also removes their RLS policies, which
+-- depend on is_admin() — so the function drops below can't hit 2BP01.
+drop table if exists
+    public.test_created,
+    public.test,
+    public.resource_steps,
+    public.resources,
+    public.messages,
+    public.sessions,
+    public.agreement_acceptances,
+    public.agreements,
+    public.prompts,
+    public.profiles
+    cascade;
+
+drop function if exists public.handle_new_user() cascade;
+drop function if exists public.is_admin() cascade;
+
+-- Delete every account. Cascades clean out the rest of the auth schema
+-- (identities, sessions, refresh tokens, MFA factors).
+delete from auth.users;
 
 -- gen_random_uuid() lives in pgcrypto (already enabled on Supabase, but be safe)
 create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------------------
--- profiles: one row per auth user, holds role + email. Auto-created by a
--- trigger when a user signs up (see handle_new_user below).
+-- 1. profiles: one row per auth user, holds role + email. Auto-created by a
+--    trigger when a user signs up (handle_new_user below).
 -- ---------------------------------------------------------------------------
-create table if not exists public.profiles (
+create table public.profiles (
     id           uuid primary key references auth.users(id) on delete cascade,
     email        text,
     display_name text,
-    role         text not null default 'user' check (role in ('user', 'admin')),
+    role         text not null default 'user'
+                 check (role in ('user', 'staff', 'admin')),
     created_at   timestamptz not null default now()
 );
 
--- Additive (idempotent): the admin site's 'staff' role. Promote someone with:
---   update public.profiles set role = 'staff' where email = 'person@example.com';
-alter table public.profiles drop constraint if exists profiles_role_check;
-alter table public.profiles add constraint profiles_role_check
-    check (role in ('user', 'staff', 'admin'));
+-- Auto-create a profile row whenever a new auth user is created.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+    insert into public.profiles (id, email)
+    values (new.id, new.email)
+    on conflict (id) do nothing;
+    return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+    after insert on auth.users
+    for each row execute function public.handle_new_user();
+
+-- Helper: is the current user staff/admin? (used by the RLS policies)
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer set search_path = public
+as $$
+    select exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role in ('staff', 'admin')
+    );
+$$;
 
 -- ---------------------------------------------------------------------------
--- agreements: the user agreement text, versioned and stored in the DB so it
--- can be shown before registration and edited without a code change.
+-- 2. agreements: the user agreement text, versioned and stored in the DB so it
+--    can be shown before registration and edited without a code change.
 -- ---------------------------------------------------------------------------
-create table if not exists public.agreements (
+create table public.agreements (
     id         uuid primary key default gen_random_uuid(),
     version    text not null unique,
     title      text not null,
@@ -42,8 +103,8 @@ create table if not exists public.agreements (
     created_at timestamptz not null default now()
 );
 
--- agreement_acceptances: records which user accepted which agreement version.
-create table if not exists public.agreement_acceptances (
+-- agreement_acceptances: which user accepted which agreement version.
+create table public.agreement_acceptances (
     id           uuid primary key default gen_random_uuid(),
     user_id      uuid not null references auth.users(id) on delete cascade,
     agreement_id uuid not null references public.agreements(id) on delete cascade,
@@ -51,13 +112,15 @@ create table if not exists public.agreement_acceptances (
     unique (user_id, agreement_id)
 );
 
+create index idx_acceptances_agreement on public.agreement_acceptances(agreement_id);
+
 -- ---------------------------------------------------------------------------
--- prompts: the agents' system prompts, stored in the DB so they can be edited
--- in the Supabase dashboard without a code change. Seeded on first boot from
--- the bundled .txt files (app/prompt_builder/prompt/). Keys: 'composed',
--- 'summarise'. The app falls back to the bundled files if this table is empty.
+-- 3. prompts: the agents' system prompts, editable in the admin dashboard's
+--    Prompts editor (or Supabase) without a code change. Seeded on first boot
+--    from the bundled .txt files. `key` is the single identifier used by BOTH
+--    the app's prompt loader and the admin editor ('composed', 'summarise').
 -- ---------------------------------------------------------------------------
-create table if not exists public.prompts (
+create table public.prompts (
     id          uuid primary key default gen_random_uuid(),
     key         text not null unique,
     content     text not null,
@@ -66,21 +129,26 @@ create table if not exists public.prompts (
 );
 
 -- ---------------------------------------------------------------------------
--- sessions: one chat thread per row.
+-- 4. sessions: one chat thread per row.
+--    mode: 'multi' = normal instant replies; 'experiment' = supervised
+--    (every reply reviewed by staff on the Live Counselling page).
 -- ---------------------------------------------------------------------------
-create table if not exists public.sessions (
+create table public.sessions (
     id         uuid primary key default gen_random_uuid(),
     user_id    uuid not null references auth.users(id) on delete cascade,
     title      text not null default 'New chat',
-    mode       text not null default 'multi',
+    mode       text not null default 'multi'
+               check (mode in ('multi', 'experiment')),
     created_at timestamptz not null default now()
 );
 
-create index if not exists idx_sessions_user on public.sessions(user_id, created_at desc);
+create index idx_sessions_user on public.sessions(user_id, created_at desc);
+-- The Live Counselling page polls the experiment-session list.
+create index idx_sessions_experiment
+    on public.sessions(created_at desc) where mode = 'experiment';
 
 -- ---------------------------------------------------------------------------
--- messages v2: one conversation turn per row, redesigned for experiment mode
--- (supervised live counselling).
+-- 5. messages: one conversation turn per row.
 --
 --   draft_reply  what the multi-agent pipeline generated (in normal chats it
 --                equals reply; in experiment chats it is the reviewed draft)
@@ -92,22 +160,9 @@ create index if not exists idx_sessions_user on public.sessions(user_id, created
 --                            reply = staff text, draft_reply keeps the
 --                            rejected original (terminal)
 --   reviewed_by / reviewed_at  which staff member resolved it, and when
---
--- The one-time DO block below REBUILDS the table (drops all old rows) when it
--- detects the pre-experiment shape (no `status` column). This data loss is
--- deliberate and accepted; the block no-ops on databases already migrated.
+--   rating / feedback / feedback_by / feedback_at  staff review of the reply
 -- ---------------------------------------------------------------------------
-do $$ begin
-    if exists (select 1 from information_schema.columns
-               where table_schema = 'public' and table_name = 'messages')
-       and not exists (select 1 from information_schema.columns
-               where table_schema = 'public' and table_name = 'messages'
-                 and column_name = 'status') then
-        drop table public.messages;   -- old shape -> rebuild below
-    end if;
-end $$;
-
-create table if not exists public.messages (
+create table public.messages (
     id                 uuid primary key default gen_random_uuid(),
     session_id         uuid not null references public.sessions(id) on delete cascade,
     user_id            uuid not null references auth.users(id) on delete cascade,
@@ -122,8 +177,6 @@ create table if not exists public.messages (
     emotion_confidence real,
     escalated          boolean not null default false,
     summary            text,
-    -- Staff feedback on the reply (rating 1-5 + free text + who gave it),
-    -- written by the staff review tools (/api/admin).
     rating             smallint constraint messages_rating_range
                        check (rating is null or rating between 1 and 5),
     feedback           text,
@@ -132,41 +185,42 @@ create table if not exists public.messages (
     created_at         timestamptz not null default now()
 );
 
-create index if not exists idx_messages_session on public.messages(session_id, created_at);
+-- Transcript reads + the user chat's pending poll (both filter by session).
+create index idx_messages_session on public.messages(session_id, created_at);
 -- The staff review queue reads pending turns crisis-first, oldest-first.
-create index if not exists idx_messages_pending
+create index idx_messages_pending
     on public.messages (escalated desc, created_at) where status = 'pending';
-
--- Recreate RLS for databases where the DO block dropped the table.
-alter table public.messages enable row level security;
-drop policy if exists messages_own on public.messages;
-create policy messages_own on public.messages
-    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
--- Sessions carry the chat mode: 'multi' = normal instant replies,
--- 'experiment' = supervised (every reply reviewed by staff before delivery).
-alter table public.sessions drop constraint if exists sessions_mode_check;
-alter table public.sessions add constraint sessions_mode_check
-    check (mode in ('multi', 'experiment'));
+-- Per-user reads (admin review, all-user emotion analysis) + fast cascades.
+create index idx_messages_user on public.messages(user_id, created_at);
 
 -- ---------------------------------------------------------------------------
--- resources: mental-health info cards. Each has an info body (one tab) and a
--- set of "steps to overcome it" (another tab, see resource_steps).
+-- 6. resources: mental-health info cards, imported by scripts/scrape_resources.py
+--    and editable in the admin dashboard (the script full-replaces the table).
+--   kind:         'article' = in-house info + steps tabs
+--                 'video'   = YouTube video (embedded in the detail view)
+--                 'link'    = external article/guide (opens in a new tab)
+--                 'test'    = external self-assessment (opens in a new tab)
+--   external_url: target for video/link/test rows (null for articles)
+--   source:       who hosts the content, e.g. 'helpguide.org' (shown on cards)
 -- ---------------------------------------------------------------------------
-create table if not exists public.resources (
+create table public.resources (
     id           uuid primary key default gen_random_uuid(),
     slug         text not null unique,
     title        text not null,
     category     text,
     summary      text,
-    info         text not null,
+    info         text,
+    kind         text not null default 'article'
+                 check (kind in ('article', 'video', 'link', 'test')),
+    external_url text,
+    source       text,
     image_url    text,
     is_published boolean not null default true,
     sort_order   int not null default 0,
     created_at   timestamptz not null default now()
 );
 
-create table if not exists public.resource_steps (
+create table public.resource_steps (
     id          uuid primary key default gen_random_uuid(),
     resource_id uuid not null references public.resources(id) on delete cascade,
     step_order  int not null default 0,
@@ -174,48 +228,40 @@ create table if not exists public.resource_steps (
     content     text not null
 );
 
-create index if not exists idx_steps_resource on public.resource_steps(resource_id, step_order);
-
--- Additive (idempotent) for databases created before external resources existed.
--- Resources are imported from the TAR UMT counselling self-help page by
--- scripts/scrape_resources.py; most are external links / videos / self-tests.
---   kind:         'article' = in-house info + steps tabs
---                 'video'   = YouTube video (embedded in the detail view)
---                 'link'    = external article/guide (opens in a new tab)
---                 'test'    = external self-assessment (opens in a new tab)
---   external_url: target for video/link/test rows (null for articles)
---   source:       who hosts the content, e.g. 'helpguide.org' (shown on cards)
-alter table public.resources add column if not exists kind text not null default 'article';
-alter table public.resources add column if not exists external_url text;
-alter table public.resources add column if not exists source text;
-alter table public.resources alter column info drop not null;
-do $$ begin
-    if not exists (select 1 from pg_constraint where conname = 'resources_kind_check') then
-        alter table public.resources
-            add constraint resources_kind_check check (kind in ('article', 'video', 'link', 'test'));
-    end if;
-end $$;
+create index idx_steps_resource on public.resource_steps(resource_id, step_order);
 
 -- ---------------------------------------------------------------------------
--- Auto-create a profile row whenever a new auth user is created.
+-- 7. Self-tests. `test` holds the screening instruments (questions + scoring
+--    as JSON, seeded on boot from app/resources/self_test/definitions.py).
+--    Every completed attempt lands in `test_created`.
 -- ---------------------------------------------------------------------------
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer set search_path = public
-as $$
-begin
-    insert into public.profiles (id, email)
-    values (new.id, new.email)
-    on conflict (id) do nothing;
-    return new;
-end;
-$$;
+create table public.test (
+    id           uuid primary key default gen_random_uuid(),
+    slug         text not null unique,
+    title        text not null,
+    description  text,
+    questions    jsonb not null,   -- [{text, options: [{label, value}]}]
+    scoring      jsonb not null,   -- {max, bands: [{min, max, label, advice}], ...}
+    source       text,
+    reference    text,
+    sort_order   int not null default 0,
+    is_published boolean not null default true,
+    created_at   timestamptz not null default now()
+);
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-    after insert on auth.users
-    for each row execute function public.handle_new_user();
+create table public.test_created (
+    id         uuid primary key default gen_random_uuid(),
+    user_id    uuid not null references auth.users(id) on delete cascade,
+    test_id    uuid not null references public.test(id) on delete cascade,
+    answer     jsonb not null,    -- list of chosen option indexes
+    score      int,
+    band       text,
+    created_at timestamptz not null default now()
+);
+
+create index idx_test_created_user on public.test_created(user_id, created_at desc);
+-- Self-test analytics aggregates attempts per test; also speeds cascades.
+create index idx_test_created_test on public.test_created(test_id);
 
 -- ===========================================================================
 -- Row Level Security.
@@ -231,108 +277,55 @@ alter table public.sessions              enable row level security;
 alter table public.messages              enable row level security;
 alter table public.resources             enable row level security;
 alter table public.resource_steps        enable row level security;
+alter table public.test                  enable row level security;
+alter table public.test_created          enable row level security;
 
--- Helper: is the current user staff/admin? (used by the RLS policies)
-create or replace function public.is_admin()
-returns boolean
-language sql
-security definer set search_path = public
-as $$
-    select exists (
-        select 1 from public.profiles
-        where id = auth.uid() and role in ('staff', 'admin')
-    );
-$$;
-
--- profiles: a user sees/edits their own row; admins see all.
-drop policy if exists profiles_select on public.profiles;
+-- profiles: a user sees/edits their own row; staff/admins see all.
 create policy profiles_select on public.profiles
     for select using (auth.uid() = id or public.is_admin());
-drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles
     for update using (auth.uid() = id);
 
--- agreements: anyone may read; only admins may write.
-drop policy if exists agreements_read on public.agreements;
+-- agreements: anyone may read; only staff/admins may write.
 create policy agreements_read on public.agreements for select using (true);
-drop policy if exists agreements_admin on public.agreements;
 create policy agreements_admin on public.agreements
     for all using (public.is_admin()) with check (public.is_admin());
 
--- prompts: anyone may read; only admins may edit.
-drop policy if exists prompts_read on public.prompts;
+-- prompts: anyone may read; only staff/admins may edit.
 create policy prompts_read on public.prompts for select using (true);
-drop policy if exists prompts_admin on public.prompts;
 create policy prompts_admin on public.prompts
     for all using (public.is_admin()) with check (public.is_admin());
 
 -- agreement_acceptances: a user manages only their own.
-drop policy if exists acceptances_own on public.agreement_acceptances;
 create policy acceptances_own on public.agreement_acceptances
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- sessions / messages: owner-only.
-drop policy if exists sessions_own on public.sessions;
 create policy sessions_own on public.sessions
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-drop policy if exists messages_own on public.messages;
 create policy messages_own on public.messages
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
--- resources / steps: published rows are world-readable; admins manage.
-drop policy if exists resources_read on public.resources;
+-- resources / steps: published rows are world-readable; staff/admins manage.
 create policy resources_read on public.resources
     for select using (is_published or public.is_admin());
-drop policy if exists resources_admin on public.resources;
 create policy resources_admin on public.resources
     for all using (public.is_admin()) with check (public.is_admin());
-drop policy if exists steps_read on public.resource_steps;
 create policy steps_read on public.resource_steps for select using (true);
-drop policy if exists steps_admin on public.resource_steps;
 create policy steps_admin on public.resource_steps
     for all using (public.is_admin()) with check (public.is_admin());
 
--- ---------------------------------------------------------------------------
--- Self-tests. `test` holds the screening instruments (questions + scoring as
--- JSON, seeded on boot from app/resources/self_test/definitions.py). Every
--- completed attempt is stored in `test_created`: who took it, their answers,
--- the score, and when.
--- ---------------------------------------------------------------------------
-create table if not exists public.test (
-    id           uuid primary key default gen_random_uuid(),
-    slug         text not null unique,
-    title        text not null,
-    description  text,
-    questions    jsonb not null,   -- [{text, options: [{label, value}]}]
-    scoring      jsonb not null,   -- {max, bands: [{min, max, label, advice}], ...}
-    source       text,
-    reference    text,
-    sort_order   int not null default 0,
-    is_published boolean not null default true,
-    created_at   timestamptz not null default now()
-);
-
-create table if not exists public.test_created (
-    id         uuid primary key default gen_random_uuid(),
-    user_id    uuid not null references auth.users(id) on delete cascade,
-    test_id    uuid not null references public.test(id) on delete cascade,
-    answer     jsonb not null,    -- list of chosen option indexes
-    score      int,
-    band       text,
-    created_at timestamptz not null default now()
-);
-
-create index if not exists idx_test_created_user on public.test_created(user_id, created_at desc);
-
-alter table public.test         enable row level security;
-alter table public.test_created enable row level security;
-
-drop policy if exists test_read on public.test;
+-- self-tests: published instruments are world-readable; attempts are owner-only.
 create policy test_read on public.test
     for select using (is_published or public.is_admin());
-drop policy if exists test_admin on public.test;
 create policy test_admin on public.test
     for all using (public.is_admin()) with check (public.is_admin());
-drop policy if exists test_created_own on public.test_created;
 create policy test_created_own on public.test_created
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ===========================================================================
+-- Bootstrap the first admin (run AFTER registering + verifying the account
+-- in the app — a reset deletes all accounts, so this is needed every time):
+--
+--   update public.profiles set role = 'admin' where email = 'you@example.com';
+-- ===========================================================================
