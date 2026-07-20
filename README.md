@@ -23,7 +23,12 @@ This edition stores everything in **Supabase** (Postgres + email-verified Auth).
 Open your Supabase project → **SQL Editor** → **New query**, paste the entire
 contents of [`schema.sql`](schema.sql), and **Run** it. This creates all tables,
 row-level-security policies, and the trigger that auto-creates a profile for
-each new user. It is idempotent — safe to re-run after every update.
+each new user.
+
+> ⚠️ `schema.sql` is a **full reset script**: every run **drops all app tables
+> and deletes every user account** (Supabase Auth included), then recreates the
+> schema from scratch. That is the intended workflow for schema changes — but
+> never run it against data you want to keep.
 
 ### b. Turn on email verification + set the redirect URL
 In Supabase → **Authentication → Sign In / Providers → Email**:
@@ -208,9 +213,12 @@ Sessions and the Testing bench): staff rate bot replies and leave feedback via
 `POST /api/admin/messages/{id}/feedback`, and session exports include them —
 a ready-made quality dataset for future fine-tuning.
 
-> Re-running `schema.sql` after an update is safe and idempotent — it adds new
-> tables/columns (resources columns, self-tests, staff role) without touching
-> existing data.
+> ⚠️ Re-running `schema.sql` **wipes the database and all user accounts**, then
+> recreates the schema. After every reset: (1) `python run.py` re-seeds the
+> agreement, prompts, and self-tests; (2) rerun
+> `python scripts/scrape_resources.py` to restore the Resources content;
+> (3) register your admin account again and re-promote it with the SQL at the
+> bottom of `schema.sql` (the demo admin above is deleted too).
 
 ### Where to edit what
 See [`CODING_GUIDE.md`](CODING_GUIDE.md) for the user-side / admin-side split —
