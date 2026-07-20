@@ -10,7 +10,9 @@ The page itself is a static shell — every piece of data comes from the guarded
 """
 import json
 import os
+import re
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from flask import Blueprint, Response, render_template, request, jsonify, g
 
@@ -245,6 +247,13 @@ def _write_response(ok, failure_message):
     return json_error(failure_message, 500)
 
 
+def _slug_for(title):
+    """Unique slug for editor-created rows (slug is NOT NULL UNIQUE in the DB).
+    The random suffix keeps duplicate titles from colliding."""
+    base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "untitled"
+    return f"{base[:60]}-{uuid4().hex[:6]}"
+
+
 def _resource_payload(data):
     return {
         "title": (data.get("title") or "").strip(),
@@ -270,6 +279,7 @@ def admin_resource_create():
     payload = _resource_payload(request.get_json(silent=True) or {})
     if not payload["title"]:
         return json_error("A resource title is required.", 400)
+    payload["slug"] = _slug_for(payload["title"])
     return _write_response(create_resource(payload),
                            "Failed to create resource in database.")
 
@@ -400,7 +410,7 @@ def admin_test_create():
         return json_error("A test title is required.", 400)
     payload = {
         "title": title,
-        "slug": title.lower().replace(" ", "-"),
+        "slug": _slug_for(title),
         "description": data.get("description"),
         "questions": data.get("questions", []),
         "scoring": data.get("scoring", {}),
@@ -414,11 +424,12 @@ def admin_test_create():
 @staff_required
 def admin_test_update(test_id):
     data = request.get_json(silent=True) or {}
-    payload = {
-        "title": data.get("title"),
-        "description": data.get("description"),
-        "questions": data.get("questions"),
-    }
+    # Only send the fields the client actually provided — a partial update must
+    # not null out columns (title is NOT NULL in the DB).
+    payload = {k: data[k] for k in ("title", "description", "questions", "scoring")
+               if data.get(k) is not None}
+    if not payload:
+        return json_error("Nothing to update.", 400)
     return _write_response(update_test(test_id, payload),
                            "Failed to update test.")
 

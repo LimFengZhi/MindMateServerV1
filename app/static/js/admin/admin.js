@@ -19,7 +19,6 @@ let selectedUserEmail = null; // drill-down state
 let staffCache = [];          // staff accounts (admin only)
 let resourcesCache = [];      // resources editor
 let testsCache = [];          // assessments editor
-let testChartInstance = null; // Chart.js instance (test analysis)
 
 if (requireAuth()) initAdmin();
 
@@ -117,14 +116,7 @@ async function loadEmotions() {
   if (r.error) { showErrorPlaceholder($("emotionBody"), r.error); return; }
   if (!r.total) { showPlaceholder($("emotionBody"), "No messages yet."); return; }
 
-  const entries = Object.entries(r.counts || {}).sort((a, b) => b[1] - a[1]);
-  const max = entries.length ? entries[0][1] : 1;
-  const bars = entries.map(([emotion, count]) => `
-    <div class="bar-row">
-      <div class="bar-label">${escapeHTML(emotion)}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round((count / max) * 100)}%"></div></div>
-      <div class="bar-count">${count}</div>
-    </div>`).join("");
+  const bars = countBarsHTML(r.counts);
 
   $("emotionBody").innerHTML = `
     <div class="cards">
@@ -771,33 +763,12 @@ async function loadTestAnalytics() {
   drawBandChart(globalBands);
 }
 
-// The short delay gives the view time to unhide before Chart.js measures it.
+// All-tests risk-band distribution, drawn with the shared bar rows
+// (no external chart library — the CSP allows same-origin scripts only).
 function drawBandChart(globalBands) {
-  setTimeout(() => {
-    const canvas = document.getElementById("testScoreChart");
-    if (!canvas) return;
-    if (testChartInstance) testChartInstance.destroy();
-
-    const chartLabels = Object.keys(globalBands);
-    if (!chartLabels.length) return;
-
-    testChartInstance = new Chart(canvas.getContext("2d"), {
-      type: "bar",
-      data: {
-        labels: chartLabels,
-        datasets: [{
-          label: "Number of Users in Band",
-          data: Object.values(globalBands),
-          backgroundColor: "#4A90E2",
-          borderRadius: 6,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
-      },
-    });
-  }, 150);
+  const el = $("testScoreChart");
+  if (!el) return;
+  el.innerHTML = Object.keys(globalBands).length
+    ? countBarsHTML(globalBands)
+    : '<p class="placeholder">No attempts yet.</p>';
 }

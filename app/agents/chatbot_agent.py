@@ -5,7 +5,20 @@ Stub path: a warm, rule-based reflective responder so the chat is fully usable
 without loading a multi-GB model. It follows the same spirit as the prompt:
 reflect briefly, stay warm, ask at most one gentle open question.
 """
+import re
+
 from app.agents.base_agent import BaseAgent
+
+# First-message welcome, shared by the stub and the orchestrator's greeting
+# shortcut (the fine-tuned model hallucinates a backstory for a bare "Hi").
+WELCOME_MESSAGE = (
+    "Hi, I'm really glad you're here. This is a space to talk through "
+    "whatever's on your mind, at your own pace. What brought you here today?"
+)
+
+# The MentalChat16K training data contains literal template tokens like
+# "[Name]" / "[Age]" (372 in the raw dump), and the fine-tune emits them.
+_PLACEHOLDER_RE = re.compile(r"\[[A-Za-z][A-Za-z '/]{0,24}\]")
 
 _STUB_OPENERS = [
     "Thank you for sharing that with me.",
@@ -29,10 +42,24 @@ _STUB_CRISIS = (
 )
 
 
+def _tidy_reply(text):
+    """Clean the raw generation: drop leaked template tokens, then cut any
+    half-finished sentence left behind by the max_new_tokens cap."""
+    t = _PLACEHOLDER_RE.sub("", text)
+    t = re.sub(r"\s+([,.!?;:])", r"\1", t)      # "sharing , ." -> "sharing,."
+    t = re.sub(r"[,;:]\s*([.!?])", r"\1", t)    # "sharing,."   -> "sharing."
+    t = re.sub(r"[ \t]{2,}", " ", t).strip()
+    if t and t[-1] not in ".!?…\"'”’)":
+        cut = max(t.rfind("."), t.rfind("!"), t.rfind("?"), t.rfind("…"))
+        if cut >= 20:                            # keep short replies intact
+            t = t[:cut + 1]
+    return t
+
+
 class ChatbotAgent(BaseAgent):
     name = "chatbot"
 
-    def run(self, system_prompt, history, user_text, max_new_tokens=90):
+    def run(self, system_prompt, history, user_text, max_new_tokens=120):
         return self._with_fallback(
             self.registry.chatbot_ready,
             lambda: self._run_real(system_prompt, history, user_text, max_new_tokens),
@@ -94,7 +121,7 @@ class ChatbotAgent(BaseAgent):
                 pad_token_id=tok.eos_token_id,
             )
         text = tok.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-        return text.strip()
+        return _tidy_reply(text)
 
     # --------------------------------------------------------------- stub path
     def _run_stub(self, history, user_text):
@@ -102,9 +129,7 @@ class ChatbotAgent(BaseAgent):
         if crisis_keywords_present(user_text):
             return _STUB_CRISIS
         if not history:
-            return ("Hi, I'm really glad you're here. This is a space to talk "
-                    "through whatever's on your mind, at your own pace. What "
-                    "brought you here today?")
+            return WELCOME_MESSAGE
         turn = len(history)
         opener = _STUB_OPENERS[turn % len(_STUB_OPENERS)]
         question = _STUB_QUESTIONS[turn % len(_STUB_QUESTIONS)]

@@ -116,3 +116,37 @@ function fmtDate(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
          `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/* ---------- Shared page helpers ---------- */
+// Roles allowed into the staff site (mirrors staff_required on the server).
+const STAFF_ROLES = ["staff", "admin"];
+
+// Status line under the auth forms (login + staff login pages).
+function setAuthMsg(text, kind = "") {
+  const el = $("authMsg");
+  el.textContent = text;
+  el.className = "auth-msg" + (kind ? " " + kind : "");
+}
+
+// Auto-name a fresh "New chat" from its first message (chat + test bench).
+async function autoTitleFromMessage(sessionId, firstMessage, onApplied) {
+  const title = firstMessage.trim().slice(0, 40) || "New chat";
+  const r = await api(`/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+  if (r && !r.error) onApplied(r.title);
+}
+
+// Sorted horizontal bar rows for a {label: count} map, largest first
+// (emotion distributions, risk-band distribution).
+function countBarsHTML(counts) {
+  const entries = Object.entries(counts || {}).sort((a, b) => b[1] - a[1]);
+  const max = entries.length ? entries[0][1] : 1;
+  return entries.map(([label, count]) => `
+    <div class="bar-row">
+      <div class="bar-label">${escapeHTML(label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.round((count / max) * 100)}%"></div></div>
+      <div class="bar-count">${count}</div>
+    </div>`).join("");
+}

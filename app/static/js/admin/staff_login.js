@@ -4,8 +4,6 @@
    staff/admin get through; everyone else is told this isn't their entrance.
    =========================================================================== */
 
-const STAFF_ROLES = ["staff", "admin"];
-
 // Already signed in: staff go to the dashboard, everyone else to the app.
 if (getToken()) {
   api("/auth/me").then((me) => {
@@ -13,12 +11,6 @@ if (getToken()) {
       location.href = STAFF_ROLES.includes(me.role) ? "/admin" : "/chat";
     }
   });
-}
-
-function setAuthMsg(text, kind = "") {
-  const el = $("authMsg");
-  el.textContent = text;
-  el.className = "auth-msg" + (kind ? " " + kind : "");
 }
 
 function setLoading(loading) {

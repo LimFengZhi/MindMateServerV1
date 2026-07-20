@@ -179,16 +179,11 @@ async function deleteSession(id) {
 async function maybeAutoTitle(firstMessage) {
   const s = sessions.find((x) => x.sessionID === sessionID);
   if (!s || (s.title && s.title !== "New chat")) return;
-  const title = firstMessage.trim().slice(0, 40) || "New chat";
-  const r = await api(`/sessions/${sessionID}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title }),
-  });
-  if (r && !r.error) {
-    s.title = r.title;
-    $("currentSessionTitle").textContent = r.title;
+  await autoTitleFromMessage(sessionID, firstMessage, (title) => {
+    s.title = title;
+    $("currentSessionTitle").textContent = title;
     renderSessionList();
-  }
+  });
 }
 
 /* ===================== MESSAGES ===================== */

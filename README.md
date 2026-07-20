@@ -158,6 +158,11 @@ Log in via **"Login as staff →"** on the login page (or `/admin/login`).
 > Authentication → Users) or delete the account before the app faces real
 > users or real data.
 
+> ♻️ Rerunning `schema.sql` **deletes this account** along with everything
+> else. Recreate it afterwards: register any account in the app, promote it
+> with the SQL at the bottom of `schema.sql`, or re-create this demo login
+> from the admin dashboard of another admin account.
+
 ---
 
 ## 5. Project layout

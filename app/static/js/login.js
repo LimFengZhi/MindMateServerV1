@@ -21,12 +21,6 @@ function switchTab(mode) {
   if (mode === "register" && !activeAgreement) loadAgreement();
 }
 
-function setAuthMsg(text, kind = "") {
-  const el = $("authMsg");
-  el.textContent = text;
-  el.className = "auth-msg" + (kind ? " " + kind : "");
-}
-
 async function loadAgreement() {
   const r = await api("/agreements/active");
   const body = $("agreementBody");

@@ -1,11 +1,20 @@
 """Multi-agent pipeline: diagnostic -> routing(escalation) -> summarize ->
 prompt build -> chatbot, then persist the turn."""
-from app.agents.chatbot_agent import chatbot_agent
+import re
+
+from app.agents.chatbot_agent import chatbot_agent, WELCOME_MESSAGE
 from app.agents.diagnostic_agent import diagnostic_agent
 from app.agents.summarize_agent import summarize_agent
 from app.agents.routing import routing2
 from app.prompt_builder.loader import build_composed_system
 from app.db.repo import get_history, add_message
+
+# A bare greeting with no content to reflect on ("Hi", "hello!", "good morning").
+_GREETING_RE = re.compile(
+    r"^(hi+|hey+|hello+|hiya|yo|howdy|sup|what'?s\s+up|"
+    r"good\s+(morning|afternoon|evening))(\s+there)?[\s!.,:;~-]*$",
+    re.IGNORECASE,
+)
 
 # How many recent (user, bot) turns the chatbot sees VERBATIM. Everything else
 # is carried only via the compressed summary.
@@ -41,6 +50,19 @@ def run_multi(user_id, session_id, message, diag=None):
             "confidence": diag["confidence"],
             "risk_flag": True,
             "escalated": True,
+            "summary": None,
+        }
+
+    # 2b. First-turn bare greeting -> the fixed welcome, skipping generation.
+    #     Nearly all fine-tuning examples are long emotional disclosures, so a
+    #     small tuned model met with just "Hi" invents a backstory to counsel.
+    if not full_history and _GREETING_RE.match(message.strip()):
+        return {
+            "reply": WELCOME_MESSAGE,
+            "emotion": diag["emotion"],
+            "confidence": diag["confidence"],
+            "risk_flag": diag["risk_flag"],
+            "escalated": False,
             "summary": None,
         }
 

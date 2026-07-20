@@ -64,21 +64,10 @@ function renderCards(summary) {
 }
 
 function renderDistribution(summary) {
-  const entries = Object.entries(summary.counts || {}).sort((a, b) => b[1] - a[1]);
-  const max = entries.length ? entries[0][1] : 1;
-  const rows = entries.map(([emotion, count]) => {
-    const pct = Math.round((count / max) * 100);
-    return `
-      <div class="bar-row">
-        <div class="bar-label">${escapeHTML(emotion)}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-        <div class="bar-count">${count}</div>
-      </div>`;
-  }).join("");
   return `
     <div class="section-card">
       <h3>Emotion distribution</h3>
-      ${rows}
+      ${countBarsHTML(summary.counts)}
     </div>`;
 }
 

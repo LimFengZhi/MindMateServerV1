@@ -211,12 +211,7 @@ function applyTitle(title) {
 // Like the real chat: a fresh "New chat" is titled from its first message.
 async function maybeAutoTitle(firstMessage) {
   if (currentTitle !== "New chat") return;
-  const title = firstMessage.trim().slice(0, 40) || "New chat";
-  const r = await api(`/sessions/${currentID}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title }),
-  });
-  if (r && !r.error) applyTitle(r.title);
+  await autoTitleFromMessage(currentID, firstMessage, applyTitle);
 }
 
 function exportTestChat() {

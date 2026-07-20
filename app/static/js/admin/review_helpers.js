@@ -4,9 +4,8 @@
    Load BEFORE the page's own script.
    =========================================================================== */
 
-const STAFF_ROLES = ["staff", "admin"];
-
 // Verifies the signed-in account is staff/admin; fills the topbar email.
+// (STAFF_ROLES comes from common.js, loaded on every page.)
 // Returns the /auth/me payload, or null (after redirecting) for non-staff.
 async function requireStaff() {
   const me = await api("/auth/me");
