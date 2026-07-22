@@ -1,0 +1,13 @@
+model,dataset,variant,n,bertscore_f1,bleu,rouge_l,flesch_reading_ease,flesch_kincaid_grade
+gemma2,amod,tuned,71,0.8338,0.0351,0.1652,75.97,6.47
+gemma2,amod,base,71,0.797,0.0176,0.1281,81.88,4.61
+llama32,amod,tuned,71,0.8207,0.0337,0.1523,74.19,6.59
+llama32,amod,base,71,0.791,0.0117,0.0974,70.13,6.21
+qwen3,amod,tuned,71,0.8292,0.0425,0.17,75.45,6.04
+qwen3,amod,base,71,0.8475,0.039,0.165,68.34,7.67
+gemma2,mentalchat16k,tuned,1591,0.8817,0.0765,0.2308,45.51,11.25
+gemma2,mentalchat16k,base,1591,0.8091,0.0153,0.126,74.28,6.05
+llama32,mentalchat16k,tuned,1591,0.881,0.0852,0.2306,45.64,11.27
+llama32,mentalchat16k,base,1591,0.795,0.0119,0.1125,46.13,10.57
+qwen3,mentalchat16k,tuned,1591,0.8814,0.0862,0.2309,45.3,11.37
+qwen3,mentalchat16k,base,1591,0.8604,0.0285,0.1742,63.46,8.2

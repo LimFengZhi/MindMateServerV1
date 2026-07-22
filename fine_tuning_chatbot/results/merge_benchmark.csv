@@ -1,0 +1,10 @@
+model,variant,tokens_per_sec,latency_100tok_s,method
+gemma2,adapter-4bit,6.9,14.54,fresh process per config
+gemma2,merged-4bit,13.5,7.43,fresh process per config
+gemma2,merged-bf16,20.5,4.88,fresh process per config
+llama32,adapter-4bit,13.9,7.18,fresh process per config
+llama32,merged-4bit,23.1,4.32,fresh process per config
+llama32,merged-bf16,31.2,3.2,fresh process per config
+qwen3,adapter-4bit,7.4,13.52,fresh process per config
+qwen3,merged-4bit,12.9,7.78,fresh process per config
+qwen3,merged-bf16,18.5,5.41,fresh process per config

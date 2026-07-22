@@ -1,0 +1,184 @@
+# ===========================================================================
+# Central configuration for the mental-health counseling chatbot
+# QLoRA fine-tuning study (3 models x 2 datasets).
+#
+# Every script resolves models, datasets, and paths from this file via
+# chatbot_trainer/config.py — no script hardcodes a model id, dataset id,
+# or path. All paths are relative to this file's directory
+# (fine_tuning_chatbot/); data and model weights live OUTSIDE the
+# git-tracked tree.
+# ===========================================================================
+
+seed: 42
+
+paths:
+  data_root: ../data/mh_conversation
+  models_root: ../models/chat_models
+  results_root: results
+
+# Shared system instruction — identical for all models and datasets.
+# It is stored into every processed record's messages, so the processed
+# JSONL files are the exact, self-contained training input of the study.
+system_prompt: >-
+  You are a supportive, empathetic mental health counseling assistant.
+  Respond with warmth and care. If the user expresses thoughts of self-harm
+  or suicide, gently encourage them to reach out to a crisis line or mental
+  health professional rather than attempting to resolve it yourself.
+
+# ---------------------------------------------------------------------------
+# Models (verified on HF 2026-07-17; all six repos exist)
+# ---------------------------------------------------------------------------
+models:
+  gemma2:
+    family: "Gemma 2 2B"
+    instruct_id: google/gemma-2-2b-it
+    base_id: google/gemma-2-2b
+    license: "Gemma Terms of Use — gated on HF (instant click-through acknowledgment)"
+    # Gemma 2's chat template rejects a system role; the system prompt is
+    # folded into the first user turn at template-application time.
+    supports_system_role: false
+    attn_implementation: eager   # Gemma 2 needs eager attn to avoid inf activations
+  llama32:
+    family: "Llama 3.2 1B"
+    instruct_id: meta-llama/Llama-3.2-1B-Instruct
+    base_id: meta-llama/Llama-3.2-1B
+    license: "Llama 3.2 Community License — gated on HF (Meta reviews access requests)"
+    supports_system_role: true
+  qwen3:
+    family: "Qwen3 1.7B"
+    instruct_id: Qwen/Qwen3-1.7B
+    base_id: Qwen/Qwen3-1.7B-Base   # verified to exist — Shadow-FT fully supported
+    license: "Apache-2.0 — ungated"
+    supports_system_role: true
+    # Qwen3 is a hybrid thinking model; this study uses non-thinking mode
+    # (enable_thinking=False) for both training text and inference.
+
+# Tuning method (plus the un-tuned instruct baseline). Shadow-FT was dropped
+# from the study — QLoRA only; base_id entries remain for reference.
+methods: [qlora]
+
+# ---------------------------------------------------------------------------
+# Datasets
+# ---------------------------------------------------------------------------
+datasets:
+  amod:
+    name: "Mental Health Counseling Conversations (Amod)"
+    hf_id: Amod/mental_health_counseling_conversations
+    # Pinned repo revision (verified 2026-07-17) so record ids stay stable
+    # across --force runs even if the upstream dataset changes.
+    revision: d7e86f0813c5690181b41f97403c3674aa55dcef
+    raw_filename: dataset_A_combined_dataset.json
+    license: >-
+      RAIL-D (non-commercial/research use royalty-free; commercial use requires
+      a donation to the CCC Foundation per the dataset card; redistribution only
+      unmodified). Cleaned copies in data/ are private preprocessing artifacts,
+      not redistributed.
+    # Single-turn Q&A scraped from CounselChat: real help-seeker questions,
+    # real licensed-therapist answers. The SAME question appears up to 94
+    # times with different therapist answers (995 unique contexts / 3512
+    # rows), so the split must be grouped by question to avoid leakage.
+    schema:
+      user_field: Context
+      assistant_field: Response
+    group_split_by_user_text: true
+
+  mentalchat16k:
+    name: "MentalChat16K (ShenLab)"
+    hf_id: ShenLab/MentalChat16K
+    revision: 5f60cd380cfc58f0f12d44892bed41ee3670a70a  # pinned, verified 2026-07-17
+    raw_filename: dataset_B_mentalchat16k.json
+    license: "MIT. Citation requested: Xu et al., arXiv:2503.13509."
+    # The 'instruction' column is one fixed boilerplate string on every row
+    # (verified); it carries no per-row signal and would duplicate our own
+    # system prompt, so it is NOT mapped into the user turn (matches the
+    # prior mhsupportchat study). Set use_instruction_field: true to
+    # override and prepend it to the user turn instead.
+    schema:
+      instruction_field: instruction
+      input_field: input
+      output_field: output
+    use_instruction_field: false
+    # The prior study used a row-level split, but some inputs repeat with
+    # different outputs, and a row-level split (seed 42) measurably leaked
+    # ~10 identical user texts across train/test; grouping by user text
+    # removes that at negligible cost (~99% of groups are singletons,
+    # ratios stay ~70/20/10).
+    group_split_by_user_text: true
+    # Source CSVs fetched alongside the merged dump so each row keeps its
+    # provenance (synthetic GPT-3.5 dialogues vs paraphrased caregiver
+    # interviews) via an exact-content hash join.
+    source_files:
+      synthetic: Synthetic_Data_10K.csv
+      interview: Interview_Data_6K.csv
+
+# ---------------------------------------------------------------------------
+# Splitting (method follows the prior mhsupportchat study:
+# clean -> dedupe -> shuffle(seed) -> 70/20/10)
+# ---------------------------------------------------------------------------
+split:
+  ratios:
+    train: 0.70
+    val: 0.20
+    test: 0.10
+
+# ---------------------------------------------------------------------------
+# Curated crisis-scenario training examples (safety preservation)
+# ---------------------------------------------------------------------------
+# Hand-written examples covering suicidal ideation, self-harm, abuse
+# disclosure, and medical/diagnostic-advice requests, each paired with an
+# escalation/boundary response consistent with the deployed app's crisis
+# message (Befrienders KL / 988 / Samaritans contact block). Injected into
+# the TRAIN split only, n_copies times each, then shuffled. They never
+# enter val/test, and the safety-eval prompt set (stage 3) is disjoint
+# from them by construction.
+crisis_examples:
+  inject: true
+  file: crisis_examples.json
+  n_copies: 3
+
+# ---------------------------------------------------------------------------
+# Training defaults (stage 2 — carried over from the prior study's
+# train_config.py; every train script reads these, CLI can override)
+# ---------------------------------------------------------------------------
+training:
+  max_seq_length: 512
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-4
+  lr_scheduler_type: cosine
+  warmup_steps: 300
+  bf16: true
+  logging_steps: 100
+  eval_strategy: epoch
+  save_strategy: epoch
+  load_best_model_at_end: true
+  gradient_checkpointing: true
+  packing: false
+  report_to: none
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  quant:
+    load_in_4bit: true
+    bnb_4bit_quant_type: nf4
+    bnb_4bit_compute_dtype: bfloat16
+    bnb_4bit_use_double_quant: true
+
+# ---------------------------------------------------------------------------
+# LLM-as-judge evaluation (stage 3 — MentalChat16K paper's 7-dimension rubric,
+# scored by a Claude judge on a neutral Psych8k benchmark; see llm_judge.py)
+# ---------------------------------------------------------------------------
+judge:
+  model: glm-4.7-flash          # free on Z.ai (rate limit ~1 req/s on the free tier)
+  base_url: https://api.z.ai/api/paas/v4   # Z.ai's OpenAI-compatible endpoint (per docs.z.ai)
+  api_key_env: GLM_API_KEY      # read from the project .env
+  max_tokens: 1024
+  benchmark:
+    hf_id: EmoCareAI/Psych8k    # gated on HF — accept conditions once, login via huggingface-cli
+    raw_filename: Alexander_Street_shareGPT_2.0.json
+    n_questions: 200            # benchmark subset size (sampled with the top-level seed)
+    csv: ../data/mh_conversation/benchmark/psych8k_test200.csv

@@ -1,0 +1,34 @@
+# ===========================================================================
+# fine_tuning_chatbot — mental-health counseling chatbot fine-tuning +
+# evaluation pipeline (QLoRA vs Shadow-FT comparison study).
+#
+# Versions below are the ones the study actually ran with (Python 3.12,
+# CUDA build of PyTorch installed separately — see README).
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
+# ===========================================================================
+
+# --- Core training stack ---
+transformers>=5.14
+peft>=0.19
+trl>=1.8
+bitsandbytes>=0.49
+accelerate>=1.14
+datasets>=5.0
+safetensors>=0.8
+
+# --- Data / analysis ---
+pandas>=3.0
+numpy>=2.5
+pyyaml>=6.0
+matplotlib>=3.11
+
+# --- Evaluation (automatic metrics) ---
+bert-score>=0.3.13
+rouge-score>=0.1.2
+sacrebleu>=2.4
+nltk>=3.10
+
+# --- Notebooks ---
+ipykernel>=7.3
+nbformat>=5.10
+nbclient>=0.10
