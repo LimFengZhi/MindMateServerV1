@@ -6,33 +6,33 @@ Judge: `glm-4.7-flash` via Z.ai (OpenAI-compatible API); rubric: the MentalChat1
 
 | model   | dataset       |   active_listening |   empathy_validation |   safety_trustworthiness |   openmindedness_nonjudgment |   clarity_encouragement |   boundaries_ethical |   holistic_approach |   overall |
 |:--------|:--------------|-------------------:|---------------------:|-------------------------:|-----------------------------:|------------------------:|---------------------:|--------------------:|----------:|
-| gemma2  | amod          |               2.45 |                 2.78 |                     5.44 |                         5.75 |                    2.8  |                 5.55 |                2.37 |      3.88 |
-| gemma2  | mentalchat16k |               7.34 |                 6.72 |                     8.9  |                         8.81 |                    7.42 |                 8.59 |                6.66 |      7.78 |
-| llama32 | amod          |               1.73 |                 1.98 |                     4.66 |                         5.07 |                    1.88 |                 4.95 |                1.76 |      3.15 |
-| llama32 | mentalchat16k |               6.84 |                 6.5  |                     8.59 |                         8.76 |                    6.96 |                 8.32 |                6.74 |      7.53 |
-| qwen3   | amod          |               2.64 |                 2.94 |                     5.64 |                         6.38 |                    3.64 |                 5.95 |                2.84 |      4.29 |
-| qwen3   | mentalchat16k |               6.98 |                 6.63 |                     8.72 |                         8.72 |                    7.09 |                 8.28 |                6.85 |      7.61 |
+| gemma2  | amod          |               1.01 |                 1.03 |                     1.24 |                         1.2  |                    1    |                 1.25 |                1.01 |      1.11 |
+| gemma2  | mentalchat16k |               1.12 |                 1.14 |                     1.67 |                         1.65 |                    1.08 |                 1.65 |                1.09 |      1.34 |
+| llama32 | amod          |               1    |                 1    |                     1    |                         1    |                    1    |                 1    |                1    |      1    |
+| llama32 | mentalchat16k |               1    |                 1.01 |                     1.1  |                         1.1  |                    1    |                 1.09 |                1    |      1.04 |
+| qwen3   | amod          |               1.16 |                 1.25 |                     2.5  |                         2.63 |                    1.12 |                 2.52 |                1.06 |      1.75 |
+| qwen3   | mentalchat16k |               2.43 |                 2.46 |                     5.28 |                         5.32 |                    2.6  |                 5.34 |                2.76 |      3.74 |
 
 ## Winner per dimension
 
-- **active_listening**: gemma2 tuned on mentalchat16k (7.33)
-- **empathy_validation**: gemma2 tuned on mentalchat16k (6.72)
-- **safety_trustworthiness**: gemma2 tuned on mentalchat16k (8.89)
-- **openmindedness_nonjudgment**: gemma2 tuned on mentalchat16k (8.81)
-- **clarity_encouragement**: gemma2 tuned on mentalchat16k (7.42)
-- **boundaries_ethical**: gemma2 tuned on mentalchat16k (8.59)
-- **holistic_approach**: qwen3 tuned on mentalchat16k (6.85)
-- **overall**: gemma2 tuned on mentalchat16k (7.78)
+- **active_listening**: qwen3 tuned on mentalchat16k (2.43)
+- **empathy_validation**: qwen3 tuned on mentalchat16k (2.46)
+- **safety_trustworthiness**: qwen3 tuned on mentalchat16k (5.29)
+- **openmindedness_nonjudgment**: qwen3 tuned on mentalchat16k (5.33)
+- **clarity_encouragement**: qwen3 tuned on mentalchat16k (2.60)
+- **boundaries_ethical**: qwen3 tuned on mentalchat16k (5.34)
+- **holistic_approach**: qwen3 tuned on mentalchat16k (2.75)
+- **overall**: qwen3 tuned on mentalchat16k (3.74)
 
 ## Overall ranking
 
 | model   | dataset       |   overall |
 |:--------|:--------------|----------:|
-| gemma2  | mentalchat16k |      7.78 |
-| qwen3   | mentalchat16k |      7.61 |
-| llama32 | mentalchat16k |      7.53 |
-| qwen3   | amod          |      4.29 |
-| gemma2  | amod          |      3.88 |
-| llama32 | amod          |      3.15 |
+| qwen3   | mentalchat16k |      3.74 |
+| qwen3   | amod          |      1.75 |
+| gemma2  | mentalchat16k |      1.34 |
+| gemma2  | amod          |      1.11 |
+| llama32 | mentalchat16k |      1.04 |
+| llama32 | amod          |      1    |
 
 > Notes: single LLM judge, no human calibration — scores are comparable within this run, not across judges or prompts. The benchmark is disjoint from both training datasets (verified in eda_psych8k.ipynb).
