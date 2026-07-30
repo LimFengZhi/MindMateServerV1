@@ -18,6 +18,7 @@ const TEST_ICONS = {
   "stress-level-test": "🌡️",
   "self-esteem-test": "🪞",
   "depression-test": "🌦️",
+  "suicide-risk-check": "💛",
 };
 
 /* Per-resource icon, with a category fallback for anything added later. */
@@ -31,12 +32,14 @@ const RESOURCE_ICONS = {
   "understanding-anger": "🔥",
   "anger-management-tips": "❄️",
   "breakup-coping": "💔",
+  "suicide-risk-awareness": "💛",
 };
 const CATEGORY_META = {
   "Calm Down Exercises": { icon: "🧘", tint: "tint-calm" },
   "Stress":              { icon: "🧠", tint: "tint-stress" },
   "Anger":               { icon: "🔥", tint: "tint-anger" },
   "Relationships":       { icon: "💙", tint: "tint-love" },
+  "Crisis Support":      { icon: "💛", tint: "tint-test" },
   "Self-Tests":          { icon: "📋", tint: "tint-test" },
 };
 
@@ -59,6 +62,14 @@ async function initResources() {
   if (!allResources.length && !tests.length) {
     showPlaceholder(root, "No resources available yet.");
     return;
+  }
+  // Deep link from chat: /resources#test=<slug> jumps straight into that quiz
+  // (used by the elevated-suicide-risk suggestion on chat replies).
+  const m = location.hash.match(/^#test=([\w-]+)$/);
+  if (m) {
+    history.replaceState(null, "", location.pathname); // don't re-open on refresh
+    const idx = tests.findIndex((t) => t.slug === m[1]);
+    if (idx !== -1) { openTest(idx); return; }
   }
   renderList();
 }
@@ -279,6 +290,9 @@ async function submitTest() {
 }
 
 function testResultHTML(t, r) {
+  // Safety first: when the result carries a crisis alert (PHQ-9 item 9, or
+  // always for the Suicide Risk Check), the counsellor/helpline block renders
+  // ABOVE the score so it's the first thing the user sees.
   const alert = r.alert
     ? `<div class="test-alert">${escapeHTML(r.alert)}</div>` : "";
   return `
@@ -287,10 +301,10 @@ function testResultHTML(t, r) {
       <div class="detail-cat">${escapeHTML(TESTS_CATEGORY)}</div>
       <h2>${escapeHTML(t.title)}</h2>
       <div class="test-result">
+        ${alert}
         <div class="score-big">${r.score}<span class="score-max">/ ${r.max}</span></div>
         <div class="score-band">${escapeHTML(r.band)}</div>
         <p class="score-advice">${escapeHTML(r.advice || "")}</p>
-        ${alert}
       </div>
       <button class="btn btn-ghost" onclick="startTestForm()">Retake test</button>
       ${testDisclaimerHTML(t)}

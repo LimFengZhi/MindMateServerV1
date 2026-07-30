@@ -73,6 +73,10 @@ class Config:
     # --- Diagnostic / routing (emotion classifier) ---
     RISK_CLASS = "Suicidal"
     RISK_THRESHOLD = 0.8
+    # Softer threshold: a 'Suicidal' label at/above this confidence (but below
+    # RISK_THRESHOLD) doesn't escalate, yet the reply carries a link to the
+    # in-app Suicide Risk Check self-test.
+    RISK_QUIZ_THRESHOLD = float(_env("RISK_QUIZ_THRESHOLD", "0.5"))
 
     # Crisis escalation message (Routing Layer 2).
     CRISIS_MESSAGE = (

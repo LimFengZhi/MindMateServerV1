@@ -72,7 +72,7 @@ const String kBaseUrl = String.fromEnvironment('API_BASE',
 | 13 | `POST /chat/voice` | ✔ | Send a voice recording → transcript + reply |
 | 14 | `GET /api/resources` | ✔ | List self‑help guides & exercises |
 | 15 | `GET /api/resources/{id}` | ✔ | One guide: info text + steps + reference link |
-| 16 | `GET /api/tests` | ✔ | List the self‑tests (stress / self‑esteem / depression) |
+| 16 | `GET /api/tests` | ✔ | List the self‑tests (stress / self‑esteem / depression / suicide‑risk) |
 | 17 | `GET /api/tests/{id}` | ✔ | One test's questions + options |
 | 18 | `POST /api/tests/{id}/submit` | ✔ | Submit answers → score, band, advice (stored server‑side) |
 | 19 | `GET /health` | – | Server status / which AI models are loaded |
@@ -169,6 +169,8 @@ Response `200`:
 ```
 `status` is `"delivered"` or `"pending"` (experiment mode: the reply is still with
 the counsellor — `reply` is `null`; show a waiting indicator and poll §11b).
+When a turn was flagged as elevated suicide risk, its `reply` object also carries
+`"suggestedTest": "suicide-risk-check"` (see §12) — render the same quiz link.
 `403` if not yours.
 
 ### 11) GET `/sessions/{id}/analysis` — auth
@@ -201,7 +203,8 @@ Response `200`:
 ```
 Swap each waiting indicator for its reply when its entry turns `"delivered"`;
 stop polling when nothing is `"pending"`. (The API never reveals whether the
-counsellor approved the bot's draft or replaced it.)
+counsellor approved the bot's draft or replaced it.) Delivered entries carry
+`"suggestedTest"` exactly like §12 when the turn was flagged as elevated risk.
 
 ### 12) POST `/chat` — auth · rate‑limited 20/min
 Request: `{ "sessionID": "uuid", "message": "text (≤2000 chars)" }`
@@ -215,7 +218,19 @@ show a waiting indicator and poll §11b):
 { "messageID": "uuid", "status": "pending" }
 ```
 `escalated:true` means a crisis response was returned instead of a normal reply.
-Errors: `400` (missing fields / message too long), `403` (invalid session).
+
+**Elevated suicide risk:** when the turn escalated, or the classifier labelled
+it `Suicidal` with confidence ≥ `RISK_QUIZ_THRESHOLD` (default 0.5), the payload
+additionally carries:
+```json
+{ "suggestedTest": "suicide-risk-check" }
+```
+Render it as a link into the Suicide Risk Check quiz —
+`/resources#test=suicide-risk-check` in the web app (the Resources page
+auto-opens that quiz from the hash). After submitting, the result shows the
+counsellor/helpline block **first**, then the score (§18).
+Errors: `400` (missing fields / message too long), `403` (invalid session),
+`404` (chat deleted while the reply was generating).
 
 ### 13) POST `/chat/voice` — auth · rate‑limited 10/min · `multipart/form-data`
 Form fields: `sessionID` (text), `audio` (file: wav/webm/mpeg/ogg, ≤10 MB).
@@ -223,6 +238,7 @@ Response `200`:
 ```json
 { "messageID": "uuid", "reply": "…", "emotion": "…", "confidence": 0.5, "escalated": false, "transcript": "the transcribed text" }
 ```
+May also carry `"suggestedTest"` under the same rules as §12.
 Errors: `400`, `403`, `413` (too large), `415` (unsupported type),
 `422` (couldn't transcribe), `503` (voice not available on server).
 
@@ -239,7 +255,8 @@ Response `200`:
     "image_url": null, "sort_order": 4 }
 ] }
 ```
-Categories: `Calm Down Exercises`, `Stress`, `Anger`, `Relationships`.
+Categories: `Calm Down Exercises`, `Stress`, `Anger`, `Relationships`,
+`Crisis Support`.
 
 ### 15) GET `/api/resources/{id|slug}` — auth
 Response `200`:
@@ -260,7 +277,10 @@ Calm Down Exercises category, "Steps to overcome it" otherwise), with
 
 ### 16) GET `/api/tests` — auth
 The self‑tests: Stress Level Test (PSS‑10), Self‑Esteem Test (Rosenberg),
-Depression Test (PHQ‑9).
+Depression Test (PHQ‑9), Suicide Risk Check (adapted from the SWSPHN Clinical
+Suicide Risk Screening Tool — 6 questions, bands Low / Medium / High /
+Emergency; an "immediate or next‑24‑hours plan" answer always lands in
+Emergency).
 Response `200`:
 ```json
 { "tests": [
@@ -302,7 +322,9 @@ Response `200` (the attempt is stored server‑side in `test_created`):
 }
 ```
 `alert` is a crisis‑contacts message (non‑null) when the depression test's
-self‑harm question is answered above "Not at all" — always show it prominently.
+self‑harm question is answered above "Not at all", and **always** for the
+Suicide Risk Check. Show it prominently and **before** the score/band —
+helplines come first.
 Errors: `400` (missing/invalid answers), `404` (unknown test).
 Screens should display the standard disclaimer: results are a screening, not a
 diagnosis.

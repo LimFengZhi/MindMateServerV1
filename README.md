@@ -8,8 +8,11 @@ router, a conversation summariser, and a chatbot. Around the chat it offers:
 - **Resources** — in-app self-help guides & calming exercises (content lives in
   the DB with a reference link to the original source; based on the TAR UMT
   Student Counselling Service collection)
-- **Self-Tests** — PSS-10 stress, Rosenberg self-esteem, and PHQ-9 depression
-  screens, scored server-side, with crisis contacts attached when needed
+- **Self-Tests** — PSS-10 stress, Rosenberg self-esteem, PHQ-9 depression, and
+  a Suicide Risk Check (adapted from the SWSPHN clinical screening tool),
+  scored server-side, with crisis contacts attached when needed — shown first
+  on the Suicide Risk Check result; chat replies flagged as elevated risk
+  link straight into that quiz
 - **Staff site** — a separate `/admin` dashboard where staff see usage stats and
   admins create staff accounts by email
 
@@ -83,7 +86,8 @@ Re-run it whenever you edit the content in that script. (It replaces the whole
 python run.py
 ```
 Open <http://localhost:5000>. On first boot the app **auto-seeds** the user
-agreement, the agents' prompts, and the three self-tests (no action needed).
+agreement, the agents' prompts, and the self-tests (missing tests are also
+topped up on later boots — no action needed).
 
 ### First use
 1. Go to **Register**, read the **User Agreement**, tick the box, and sign up.

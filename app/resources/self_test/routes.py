@@ -66,11 +66,14 @@ def submit(test_id):
     band = next((b for b in scoring["bands"] if b["min"] <= score <= b["max"]),
                 scoring["bands"][-1])
 
-    # Safety net (e.g. PHQ-9 item 9): certain answers always surface crisis
-    # contacts with the result, regardless of the total score.
+    # Safety net: crisis contacts surface with the result either for certain
+    # answers (e.g. PHQ-9 item 9) or unconditionally (`alert_always`, used by
+    # the Suicide Risk Check — the client shows the alert BEFORE the score).
     alert = None
     alert_q = scoring.get("alert_question")
-    if alert_q is not None and answers[alert_q] >= scoring.get("alert_min", 1):
+    if scoring.get("alert_always"):
+        alert = scoring.get("alert_message")
+    elif alert_q is not None and answers[alert_q] >= scoring.get("alert_min", 1):
         alert = scoring.get("alert_message")
 
     save_test_result(g.user["id"], t["id"], answers, score, band["label"])

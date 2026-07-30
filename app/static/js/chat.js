@@ -336,7 +336,13 @@ function answerBubble(ans) {
   if (!ans) return botBubble("No response.");
   const meta = ans.escalated
     ? '<div class="meta"><span class="tag escalated">escalated</span></div>' : "";
-  return botBubble(`${meta}<p class="answer-text">${escapeHTML(ans.reply)}</p>`);
+  // Elevated suicide risk: the server attaches the Suicide Risk Check slug —
+  // link straight to that quiz on the Resources page (auto-opened via #test=).
+  const quiz = ans.suggestedTest
+    ? `<a class="quiz-link" href="/resources#test=${escapeHTML(ans.suggestedTest)}">
+         📋 Would you take a short 6-question check-in? It helps you see how
+         you're doing and what support could help →</a>` : "";
+  return botBubble(`${meta}<p class="answer-text">${escapeHTML(ans.reply)}</p>${quiz}`);
 }
 
 function appendUser(text) {

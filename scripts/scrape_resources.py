@@ -295,6 +295,49 @@ RESOURCES = [
              "yours. This chapter ending makes room for the next one."),
         ],
     ),
+
+    # ================= Crisis Support =================
+    dict(
+        slug="suicide-risk-awareness",
+        title="Recognising Suicide Risk",
+        category="Crisis Support",
+        summary="Warning signs to take seriously — plus a 6-question check-in you can do right now.",
+        source="SWSPHN Clinical Suicide Risk Assessment",
+        reference="https://swsphn.com.au/wp-content/uploads/2022/02/SWSPHN-Clinical-Suicide-Risk-Assessment-Word-pdf.pdf",
+        info=(
+            "Thoughts of suicide are more common than most people realise, and having "
+            "them does not make you broken — it means you're carrying more pain than "
+            "you currently have support for. Risk is higher when several things stack "
+            "up at once: suicidal thoughts, a plan, a past attempt, painful recent "
+            "events, and feeling cut off from support or from your usual ways of "
+            "coping.\n\n"
+            "Clinicians screen for exactly those factors. The Suicide Risk Check in "
+            "the Self-Tests section of this page is a 6-question self check-in "
+            "adapted from the same screening tool (SWSPHN). It takes about a minute, "
+            "and your result comes with the right support contacts for your level.\n\n"
+            "If you are in danger right now, skip everything below and call your "
+            "local emergency number — or Befrienders KL 03-7627 2929 (24 hours), "
+            "US 988, UK & ROI Samaritans 116 123."
+        ),
+        steps=[
+            ("Know the warning signs", "Talking about wanting to die or being a burden, "
+             "searching for a method, withdrawing from people, giving things away, "
+             "sudden calm after despair, more alcohol/drugs or risk-taking."),
+            ("Do the 1-minute check-in", "Open Self-Tests on this page and take the "
+             "Suicide Risk Check — six honest yes/no questions adapted from the "
+             "clinical screening tool. Your result explains what it means."),
+            ("Act on your level", "Low: keep your supports close and check in again "
+             "when things change. Medium: talk to a counsellor or your doctor soon. "
+             "High: reach out today and try not to be alone."),
+            ("Treat a plan as an emergency", "If you could act on a plan now or within "
+             "24 hours: do not stay alone, remove anything you could use to hurt "
+             "yourself, and call your local emergency number or go to the nearest "
+             "emergency department."),
+            ("Keep the helplines close", "Befrienders KL 03-7627 2929 (24 hours) · "
+             "US: call or text 988 · UK & ROI: Samaritans 116 123. Saving one in "
+             "your phone now makes it easier to use later."),
+        ],
+    ),
 ]
 
 

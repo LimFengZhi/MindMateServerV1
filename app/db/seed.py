@@ -54,14 +54,19 @@ def ensure_seed():
 
 
 def _seed_tests(sb):
-    """Seed the self-test instruments (stress / self-esteem / depression)."""
-    existing = sb.table("test").select("id").limit(1).execute()
-    if existing.data:
-        return
+    """Seed the self-test instruments (stress / self-esteem / depression /
+    suicide-risk). Unlike the other seeders this one TOPS UP: any test slug
+    from definitions.py that is missing from the table is inserted, so a new
+    instrument reaches existing databases without a reset. Existing rows are
+    never touched (dashboard edits survive)."""
     from app.resources.self_test.definitions import TESTS
-    rows = [dict(t, sort_order=i) for i, t in enumerate(TESTS)]
-    sb.table("test").insert(rows).execute()
-    print(f"[seed] inserted {len(rows)} self-tests")
+    existing = sb.table("test").select("slug").execute()
+    have = {r["slug"] for r in (existing.data or [])}
+    rows = [dict(t, sort_order=i) for i, t in enumerate(TESTS)
+            if t["slug"] not in have]
+    if rows:
+        sb.table("test").insert(rows).execute()
+        print(f"[seed] inserted {len(rows)} self-tests")
 
 
 def _seed_prompts(sb):

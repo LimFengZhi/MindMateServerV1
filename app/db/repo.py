@@ -233,6 +233,17 @@ def _public_status(db_status):
     return "pending" if db_status == "pending" else "delivered"
 
 
+def _reply_extras(row):
+    """Turn metadata shared by transcript + pending payloads: the suggested
+    Suicide Risk Check link is derived from the persisted emotion/confidence/
+    escalated columns, so it survives reloads identically to the live reply."""
+    from app.agents.routing import needs_risk_check, RISK_CHECK_SLUG
+    if needs_risk_check(row.get("emotion"), row.get("emotion_confidence"),
+                        bool(row.get("escalated"))):
+        return {"suggestedTest": RISK_CHECK_SLUG}
+    return {}
+
+
 def get_transcript(user_id, session_id):
     """Ordered turns for rebuilding the chat view."""
     rows = _session_messages(user_id, session_id)
@@ -240,7 +251,8 @@ def get_transcript(user_id, session_id):
         "messageID": r["id"],
         "question": r["question"],
         "status": _public_status(r.get("status")),
-        "reply": ({"reply": r.get("reply"), "escalated": bool(r.get("escalated"))}
+        "reply": (dict({"reply": r.get("reply"),
+                        "escalated": bool(r.get("escalated"))}, **_reply_extras(r))
                   if r.get("reply") is not None else None),
         "created_at": r.get("created_at"),
     } for r in rows]
@@ -265,14 +277,14 @@ def get_pending_status(user_id, session_id):
         if r["status"] == "pending":
             out.append({"messageID": r["id"], "status": "pending"})
         else:
-            out.append({
+            out.append(dict({
                 "messageID": r["id"],
                 "status": "delivered",
                 "reply": r.get("reply"),
                 "emotion": r.get("emotion"),
                 "confidence": r.get("emotion_confidence"),
                 "escalated": bool(r.get("escalated")),
-            })
+            }, **_reply_extras(r)))
     return out
 
 

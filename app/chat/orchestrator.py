@@ -5,7 +5,7 @@ import re
 from app.agents.chatbot_agent import chatbot_agent, WELCOME_MESSAGE
 from app.agents.diagnostic_agent import diagnostic_agent
 from app.agents.summarize_agent import summarize_agent
-from app.agents.routing import routing2
+from app.agents.routing import routing2, needs_risk_check, RISK_CHECK_SLUG
 from app.prompt_builder.loader import build_composed_system
 from app.db.repo import get_history, add_message
 
@@ -118,10 +118,16 @@ def answer(user_id, session_id, message, mode="multi"):
         escalated=result["escalated"], summary=result.get("summary"),
     )
 
-    return {
+    payload = {
         "messageID": row["id"],
         "reply": result["reply"],
         "emotion": result["emotion"],
         "confidence": result["confidence"],
         "escalated": result["escalated"],
     }
+    # Elevated suicide risk (crisis turns, or a confident 'Suicidal' label
+    # below the escalation threshold): point the user at the in-app Suicide
+    # Risk Check quiz. The frontend renders this as a link on the reply.
+    if needs_risk_check(result["emotion"], result["confidence"], result["escalated"]):
+        payload["suggestedTest"] = RISK_CHECK_SLUG
+    return payload

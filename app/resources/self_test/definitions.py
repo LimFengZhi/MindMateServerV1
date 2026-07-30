@@ -1,9 +1,11 @@
-"""The three self-test instruments, seeded into the `test` table on boot.
+"""The self-test instruments, seeded into the `test` table on boot.
 
 All are standard, freely usable screens:
   - Stress Level Test  -> Perceived Stress Scale (PSS-10), Cohen et al.
   - Self-Esteem Test   -> Rosenberg Self-Esteem Scale (RSES)
   - Depression Test    -> PHQ-9 (the screen used by Mental Health America)
+  - Suicide Risk Check -> adapted from the SWSPHN Clinical Suicide Risk
+                          Screening Tool (self-administered wording)
 
 Each question carries its own option values, so reverse-scored items are just
 options with reversed values — the scorer in routes.py simply sums the chosen
@@ -69,6 +71,48 @@ _DEPRESSION_QUESTIONS = [
      "around a lot more than usual", _PHQ),
     ("Thoughts that you would be better off dead, or of hurting yourself in "
      "some way", _PHQ),
+]
+
+# ---------------- Suicide Risk Check (adapted from SWSPHN) ----------------
+# Source: SWSPHN Clinical Suicide Risk Assessment screening tool. The original
+# is a clinician-administered 6-section checklist scored by counting ticks:
+# Low 0-1, Medium 2-3, High 4-6, and Emergency when a plan is immediate /
+# within 24 hours. This adaptation keeps the six sections as six
+# self-administered questions with the same count-based scoring; the
+# "immediate plan" answer carries value 10 so it always lands in the
+# Emergency band regardless of the other answers.
+_YN = _opts(["No", "Yes"], [0, 1])
+_YN_R = _opts(["Yes", "No"], [0, 1])  # protective factors: their ABSENCE scores
+
+_SUICIDE_HELPLINES = (
+    "Befrienders KL 03-7627 2929 (24 hours) · US: call or text 988 · "
+    "UK & ROI: Samaritans 116 123 — or your local emergency number if you "
+    "are in immediate danger."
+)
+
+_SUICIDE_QUESTIONS = [
+    {"text": "Have things been so bad lately that you have thought about "
+             "suicide?",
+     "options": _YN},
+    {"text": "Have you made any plans to take your own life?",
+     "options": _opts(
+         ["No",
+          "Yes — but not right away",
+          "Yes — I could act on it now or within the next 24 hours"],
+         [0, 1, 10])},
+    {"text": "Have you ever tried to take your own life before?",
+     "options": _YN},
+    {"text": "Have you been going through upsetting events lately? "
+             "(a breakup, family conflict, losing a job, abuse, legal "
+             "trouble, chronic pain or illness, grief, trauma)",
+     "options": _YN},
+    {"text": "Do you have people who support you? (family, friends, a "
+             "partner, a doctor, a counsellor or health worker)",
+     "options": _YN_R},
+    {"text": "Do you have ways of coping that have helped you through tough "
+             "times before? (reasons to live, strategies that worked in past "
+             "crises, personal strengths)",
+     "options": _YN_R},
 ]
 
 TESTS = [
@@ -183,6 +227,55 @@ TESTS = [
                 "You mentioned thoughts of self-harm. You don't have to carry that "
                 "alone — please reach out now: Befrienders KL 03-7627 2929 (24 hours), "
                 "or your local emergency number if you're in immediate danger."
+            ),
+        },
+    },
+    {
+        "slug": "suicide-risk-check",
+        "title": "Suicide Risk Check",
+        "description": (
+            "A short check adapted from the SWSPHN Clinical Suicide Risk "
+            "Screening Tool. Answer honestly about how things are for you "
+            "RIGHT NOW. If you are in immediate danger, don't finish the "
+            "quiz — call your local emergency number straight away."
+        ),
+        "source": "SWSPHN Clinical Suicide Risk Assessment",
+        "reference": ("https://swsphn.com.au/wp-content/uploads/2022/02/"
+                      "SWSPHN-Clinical-Suicide-Risk-Assessment-Word-pdf.pdf"),
+        "questions": _SUICIDE_QUESTIONS,
+        "scoring": {
+            "max": 15,
+            "bands": [
+                {"min": 0, "max": 1, "label": "Low risk",
+                 "advice": "Your answers suggest a low level of risk right now. "
+                           "Keep checking in with yourself, and hold on to the "
+                           "people and coping strategies that support you. If "
+                           "things change, help is always there: " + _SUICIDE_HELPLINES},
+                {"min": 2, "max": 3, "label": "Medium risk",
+                 "advice": "Your answers suggest a medium level of risk. Please "
+                           "don't carry this alone — talk to a counsellor, your "
+                           "doctor, or someone you trust as soon as you can, and "
+                           "keep a helpline within reach: " + _SUICIDE_HELPLINES},
+                {"min": 4, "max": 6, "label": "High risk",
+                 "advice": "Your answers suggest a high level of risk. Please "
+                           "reach out TODAY — a counsellor, your doctor, or a "
+                           "crisis line: " + _SUICIDE_HELPLINES + " Try not to "
+                           "be alone right now, and consider telling someone "
+                           "near you how you're feeling."},
+                {"min": 7, "max": 15, "label": "Emergency",
+                 "advice": "You said you could act on a plan now or within the "
+                           "next 24 hours. Please treat this as an emergency: "
+                           "do not stay alone, remove anything you could use to "
+                           "hurt yourself, and call your local emergency number "
+                           "or go to the nearest emergency department now. "
+                           + _SUICIDE_HELPLINES},
+            ],
+            # This screen ALWAYS surfaces the counsellor / helpline block with
+            # the result (shown before the score), whatever the answers were.
+            "alert_always": True,
+            "alert_message": (
+                "If you are having thoughts of suicide, please talk to someone "
+                "now — you deserve support: " + _SUICIDE_HELPLINES
             ),
         },
     },
