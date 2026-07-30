@@ -188,22 +188,29 @@ async function maybeAutoTitle(firstMessage) {
 
 /* ===================== MESSAGES ===================== */
 // Guards against double-submits (Enter / Send while a reply is pending), which
-// used to strand an empty loading bubble and could interleave replies.
-let sending = false;
+// used to strand an empty loading bubble and could interleave replies. The
+// guard is PER CHAT: a slow reply in one chat (possibly deleted meanwhile)
+// must not silently swallow sends in every other chat.
+const inFlight = new Set(); // session ids awaiting a reply (null = blank chat)
 
 async function send() {
-  if (sending || composerLocked) return; // typed text stays in the box
+  if (composerLocked || inFlight.has(sessionID)) return; // typed text stays in the box
   const ta = $("message");
   const message = ta.value.trim();
   if (!message) return;
 
-  sending = true;
+  let flightKey = sessionID; // null until the blank chat gets its session row
+  inFlight.add(flightKey);
   $("sendBtn").disabled = true;
   try {
     if (!sessionID) {
       const ok = await createSession(message.slice(0, 40));
       if (!ok) { clearPanels(); appendError("Could not start a chat session."); return; }
+      inFlight.delete(flightKey);
+      flightKey = sessionID;
+      inFlight.add(flightKey);
     }
+    const sid = sessionID; // the chat this turn belongs to, even if the user leaves it
 
     ta.value = "";
     ta.style.height = "auto";
@@ -213,28 +220,32 @@ async function send() {
 
     const r = await api("/chat", {
       method: "POST",
-      body: JSON.stringify({ sessionID, message }),
+      body: JSON.stringify({ sessionID: sid, message }),
     });
 
     if (r.error) {
-      load.replaceWith(errorBubble(r.error));
+      load.replaceWith(errorBubble(r.error)); // no-op if the user left this chat
       scrollPanels();
       return;
     }
     if (r.status === "pending") {
-      // Experiment mode: the reply is with the counsellor. Wait + poll.
-      load.replaceWith(waitingBubble(r.messageID));
-      scrollPanels();
-      maybeAutoTitle(message);
-      setComposerLocked(true);
-      startPolling();
+      // Experiment mode: the reply is with the counsellor. Wait + poll — but
+      // only while the user is still looking at this chat (openSession rebuilds
+      // the waiting state from the transcript if they come back later).
+      if (sid === sessionID) {
+        load.replaceWith(waitingBubble(r.messageID));
+        scrollPanels();
+        maybeAutoTitle(message);
+        setComposerLocked(true);
+        startPolling();
+      }
       return;
     }
-    load.replaceWith(answerBubble(r));
+    load.replaceWith(answerBubble(r)); // no-op if the user left this chat
     scrollPanels();
-    maybeAutoTitle(message);
+    if (sid === sessionID) maybeAutoTitle(message);
   } finally {
-    sending = false;
+    inFlight.delete(flightKey);
     $("sendBtn").disabled = composerLocked; // don't undo the review lock
   }
 }
@@ -264,7 +275,11 @@ async function pollPending() {
   try {
     const r = await api(`/sessions/${sid}/pending`);
     if (sid !== sessionID) return;         // user switched chats mid-request
-    if (r.error) { stopPolling(); return; } // 401 already redirected by api()
+    // On error (chat deleted elsewhere, transient 5xx, rate limit): stop AND
+    // unlock, so the composer is never stranded in a permanently disabled
+    // state. Reopening the chat rebuilds the lock from the transcript if the
+    // turn is genuinely still pending. (401 already redirected by api().)
+    if (r.error) { stopPolling(); setComposerLocked(false); return; }
     for (const m of r.messages || []) {
       if (m.status === "delivered" && waitingBubbles.has(m.messageID)) {
         waitingBubbles.get(m.messageID).replaceWith(answerBubble(m));
@@ -418,10 +433,11 @@ async function sendVoice() {
     const ok = await createSession("New chat");
     if (!ok) { appendError("Could not start a chat session."); return; }
   }
+  const sid = sessionID; // the chat this turn belongs to, even if the user leaves it
 
   const blob = new Blob(chunks, { type: "audio/webm" });
   const form = new FormData();
-  form.append("sessionID", sessionID);
+  form.append("sessionID", sid);
   form.append("audio", blob, "voice.webm");
   appendUser("🎤 (voice message)");
   const load = appendLoading("transcribing & replying");
@@ -447,15 +463,18 @@ async function sendVoice() {
     if (bubble) bubble.textContent = r.transcript;
   }
   if (r.status === "pending") {
-    // Experiment mode: the reply is with the counsellor. Wait + poll.
-    load.replaceWith(waitingBubble(r.messageID));
-    scrollPanels();
-    if (r.transcript) maybeAutoTitle(r.transcript);
-    setComposerLocked(true);
-    startPolling();
+    // Experiment mode: the reply is with the counsellor. Wait + poll — only
+    // while the user is still looking at this chat (see send()).
+    if (sid === sessionID) {
+      load.replaceWith(waitingBubble(r.messageID));
+      scrollPanels();
+      if (r.transcript) maybeAutoTitle(r.transcript);
+      setComposerLocked(true);
+      startPolling();
+    }
     return;
   }
-  load.replaceWith(answerBubble(r));
+  load.replaceWith(answerBubble(r)); // no-op if the user left this chat
   scrollPanels();
-  if (r.transcript) maybeAutoTitle(r.transcript);
+  if (r.transcript && sid === sessionID) maybeAutoTitle(r.transcript);
 }

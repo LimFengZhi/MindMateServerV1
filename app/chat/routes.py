@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, g
 
 from app.auth.decorators import login_required, get_owned_session
 from app.chat.orchestrator import answer
+from app.db.repo import SessionDeleted
 from app.agents.voice_agent import voice_agent
 from app.agents.routing import routing1
 from app.extensions import limiter
@@ -41,8 +42,12 @@ def chat():
     if not session:
         return json_error("invalid session", 403)
 
-    return jsonify(answer(g.user["id"], session_id, message,
-                          mode=session.get("mode") or "multi"))
+    try:
+        return jsonify(answer(g.user["id"], session_id, message,
+                              mode=session.get("mode") or "multi"))
+    except SessionDeleted:
+        # The chat was deleted while the reply was generating.
+        return json_error("this chat no longer exists", 404)
 
 
 # ---------------- Voice chat ----------------
@@ -98,7 +103,11 @@ def chat_voice():
     if not message:
         return json_error("could not transcribe audio", 422)
 
-    payload = answer(g.user["id"], session_id, message,
-                     mode=session.get("mode") or "multi")
+    try:
+        payload = answer(g.user["id"], session_id, message,
+                         mode=session.get("mode") or "multi")
+    except SessionDeleted:
+        # The chat was deleted while the reply was generating.
+        return json_error("this chat no longer exists", 404)
     payload["transcript"] = message
     return jsonify(payload)

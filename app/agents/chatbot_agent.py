@@ -20,6 +20,25 @@ WELCOME_MESSAGE = (
 # "[Name]" / "[Age]" (372 in the raw dump), and the fine-tune emits them.
 _PLACEHOLDER_RE = re.compile(r"\[[A-Za-z][A-Za-z '/]{0,24}\]")
 
+# Another MentalChat16K habit: given a content-poor message ("Hi today I am
+# sad") the fine-tune sometimes answers in third-person case-note style
+# ("User has experienced grief...", "The patient describes...") — imitating the
+# dataset's clinical-summary input fields — and invents a backstory the user
+# never gave. A companion must address the user directly, so any reply that
+# narrates the user in third person is treated as a failed generation.
+# (Requires "the patient/client", so "be patient with yourself" stays fine.)
+_CASE_NOTES_RE = re.compile(
+    r"^(?:the\s+)?(?:user|patient|client)\b"     # opens by narrating the user
+    r"|\bthe\s+(?:patient|client)\b",            # or refers to them mid-reply
+    re.IGNORECASE,
+)
+
+# Shown when even the retry generation comes back as case notes.
+CASE_NOTES_FALLBACK = (
+    "Thank you for telling me — I'm here with you. Would you share a little "
+    "more about what's been going on for you today?"
+)
+
 _STUB_OPENERS = [
     "Thank you for sharing that with me.",
     "I'm really glad you put that into words.",
@@ -45,7 +64,10 @@ _STUB_CRISIS = (
 def _tidy_reply(text):
     """Clean the raw generation: drop leaked template tokens, then cut any
     half-finished sentence left behind by the max_new_tokens cap."""
-    t = _PLACEHOLDER_RE.sub("", text)
+    # "rawDesc" is another literal artifact the fine-tune emits; everything
+    # after it is derailed continuation (URLs, unrelated stories), so cut there.
+    t = text.split("rawDesc", 1)[0]
+    t = _PLACEHOLDER_RE.sub("", t)
     t = re.sub(r"\s+([,.!?;:])", r"\1", t)      # "sharing , ." -> "sharing,."
     t = re.sub(r"[,;:]\s*([.!?])", r"\1", t)    # "sharing,."   -> "sharing."
     t = re.sub(r"[ \t]{2,}", " ", t).strip()
@@ -59,7 +81,7 @@ def _tidy_reply(text):
 class ChatbotAgent(BaseAgent):
     name = "chatbot"
 
-    def run(self, system_prompt, history, user_text, max_new_tokens=120):
+    def run(self, system_prompt, history, user_text, max_new_tokens=100):
         return self._with_fallback(
             self.registry.chatbot_ready,
             lambda: self._run_real(system_prompt, history, user_text, max_new_tokens),
@@ -112,16 +134,44 @@ class ChatbotAgent(BaseAgent):
         model = self.registry.chatbot_llm
         prompt = self._build_prompt(system_prompt, history, user_text)
         inputs = tok(prompt, return_tensors="pt").to(model.device)
-        with torch.inference_mode():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=True, temperature=0.65, top_p=0.9,
-                repetition_penalty=1.15, no_repeat_ngram_size=6,
-                pad_token_id=tok.eos_token_id,
-            )
-        text = tok.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-        return _tidy_reply(text)
+
+        # Stop at <end_of_turn> as well as <eos>. The transformers-5.x merge
+        # rewrote the tuned model's config with eos_token_id=1 only (the old
+        # working merge had [1, 107]), so generation ran PAST the end of the
+        # reply into a hallucinated next turn — invented backstories, dataset
+        # junk, prompt echoes — until the token cap. Deriving the stop ids from
+        # the tokenizer makes the app immune to what the merge wrote.
+        stop_ids = [tok.eos_token_id]
+        end_turn = tok.convert_tokens_to_ids("<end_of_turn>")
+        if end_turn is not None and end_turn != tok.unk_token_id \
+                and end_turn not in stop_ids:
+            stop_ids.append(end_turn)
+
+        def generate_once():
+            with torch.inference_mode():
+                out = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=True, temperature=0.65, top_p=0.9,
+                    repetition_penalty=1.15, no_repeat_ngram_size=6,
+                    eos_token_id=stop_ids,
+                    pad_token_id=tok.eos_token_id,
+                )
+            text = tok.decode(out[0][inputs["input_ids"].shape[1]:],
+                              skip_special_tokens=True)
+            return _tidy_reply(text)
+
+        def bad(r):
+            # Empty (all junk stripped) or narrating the user in third person.
+            return not r or _CASE_NOTES_RE.search(r)
+
+        reply = generate_once()
+        if bad(reply):
+            # Sampled decoding: one resample usually yields a direct reply.
+            reply = generate_once()
+            if bad(reply):
+                reply = CASE_NOTES_FALLBACK
+        return reply
 
     # --------------------------------------------------------------- stub path
     def _run_stub(self, history, user_text):

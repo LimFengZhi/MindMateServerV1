@@ -20,6 +20,12 @@ except Exception:  # pragma: no cover
             code = None
 
 
+class SessionDeleted(Exception):
+    """The turn's session vanished mid-write (the user deleted the chat while
+    its reply was still generating). Routes map this to a clean 404 instead of
+    letting the foreign-key APIError bubble up as a 500."""
+
+
 def _first(res):
     """Return the first row of an insert/update representation, or raise a clear
     error if Postgres returned nothing (e.g. the insert was silently rejected)."""
@@ -142,21 +148,31 @@ def add_message(user_id, session_id, question, reply, emotion=None,
                 status="delivered", draft_reply=None):
     """Insert one turn. Normal chats: status='delivered' and draft_reply falls
     back to the reply itself. Experiment chats: reply=None + status='pending'
-    with the pipeline output held in draft_reply until staff resolve it."""
-    res = (get_sb().table("messages")
-           .insert({
-               "user_id": user_id,
-               "session_id": session_id,
-               "question": question,
-               "reply": reply,
-               "draft_reply": draft_reply if draft_reply is not None else reply,
-               "status": status,
-               "emotion": emotion,
-               "emotion_confidence": confidence,
-               "escalated": escalated,
-               "summary": summary,
-           })
-           .execute())
+    with the pipeline output held in draft_reply until staff resolve it.
+
+    Raises SessionDeleted if the session row is gone by the time the reply is
+    ready (the user deleted the chat while the model was still generating)."""
+    try:
+        res = (get_sb().table("messages")
+               .insert({
+                   "user_id": user_id,
+                   "session_id": session_id,
+                   "question": question,
+                   "reply": reply,
+                   "draft_reply": draft_reply if draft_reply is not None else reply,
+                   "status": status,
+                   "emotion": emotion,
+                   "emotion_confidence": confidence,
+                   "escalated": escalated,
+                   "summary": summary,
+               })
+               .execute())
+    except APIError as e:
+        # 23503 = foreign-key violation: the session (or user) row disappeared
+        # between the ownership check at request start and this insert.
+        if getattr(e, "code", None) == "23503":
+            raise SessionDeleted(session_id) from e
+        raise
     return _first(res)
 
 
