@@ -1,6 +1,6 @@
 import os
 from app import create_app
-from app.ml.registry import registry
+from app.agents.registry import registry
 
 app = create_app()
 

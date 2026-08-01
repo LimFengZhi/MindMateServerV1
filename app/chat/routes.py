@@ -4,11 +4,11 @@ import tempfile
 
 from flask import Blueprint, request, jsonify, g
 
+from app.agents import answer
+from app.agents.guards import route_modality
+from app.agents.voice import transcribe, voice_available
 from app.auth.decorators import login_required, get_owned_session
-from app.chat.orchestrator import answer
 from app.db.repo import SessionDeleted
-from app.agents.voice_agent import voice_agent
-from app.agents.routing import routing1
 from app.extensions import limiter
 from app.http_utils import json_error
 
@@ -70,8 +70,8 @@ def _transcribe_upload(f):
         f.save(tmp.name)
         tmp_path = tmp.name
     try:
-        routing1.run(has_audio=True)   # modality route -> "voice"
-        return voice_agent.run(tmp_path)
+        route_modality(has_audio=True)   # modality route -> "voice"
+        return transcribe(tmp_path)
     finally:
         os.unlink(tmp_path)
 
@@ -87,7 +87,7 @@ def chat_voice():
     if not session:
         return json_error("invalid session", 403)
 
-    if not voice_agent.available:
+    if not voice_available():
         return json_error("Voice isn't available on the server yet "
                           "(faster-whisper not installed).", 503)
 

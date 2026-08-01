@@ -15,6 +15,9 @@ PROMPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt")
 PROMPT_FILES = {
     "composed": "composed_prompt.txt",
     "summarise": "summarise_prompt.txt",
+    # The composed prompt minus its summary/memory parts — the fair-comparison
+    # baseline for the Test Chat bench's single-agent variant.
+    "single": "single_prompt.txt",
 }
 
 _CACHE_TTL = 15  # seconds
@@ -63,3 +66,10 @@ def build_composed_system(diagnostic_label, summarised_history):
 
 def build_summarise_system():
     return _resolve("summarise")
+
+
+def build_single_system():
+    """The single-agent bench baseline: the SAME rules as the composed prompt,
+    but with no summary memory (and no per-turn substitutions) — so a
+    single-vs-multi comparison isolates the architecture, not the prompt."""
+    return _resolve("single")

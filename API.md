@@ -60,7 +60,7 @@ const String kBaseUrl = String.fromEnvironment('API_BASE',
 | 2 | `POST /auth/register` | – | Create account (sends verification email) |
 | 3 | `POST /auth/login` | – | Log in → get `token` |
 | 4 | `POST /auth/logout` | ✔ | Log out (client just discards the token) |
-| 5 | `GET /auth/me` | ✔ | Current user `{id,email,role}` |
+| 5 | `GET /auth/me` | ✔ | Current user `{id,email,role,phone}` |
 | 6 | `GET /sessions` | ✔ | List the user's chats (sidebar) |
 | 7 | `POST /sessions` | ✔ | Create a new chat |
 | 8 | `PATCH /sessions/{id}` | ✔ | Rename a chat |
@@ -78,7 +78,7 @@ const String kBaseUrl = String.fromEnvironment('API_BASE',
 | 19 | `GET /health` | – | Server status / which AI models are loaded |
 
 ### Typical screen → API flow
-- **Register screen:** `GET /agreements/active` (show agreement) → `POST /auth/register`.
+- **Register screen:** `GET /agreements/active` (show agreement) → `POST /auth/register` (email + password + **phone** + agree).
 - **Login screen:** `POST /auth/login` → store `token`.
 - **Chat list (sidebar):** `GET /sessions`.
 - **Open a chat:** `GET /sessions/{id}/messages`.
@@ -102,8 +102,10 @@ Response `200`:
 ### 2) POST `/auth/register` — public  · rate‑limited 10/min
 Request:
 ```json
-{ "email": "you@example.com", "password": "min 6 chars", "agree": true }
+{ "email": "you@example.com", "password": "min 6 chars",
+  "phone": "+60123456789", "agree": true }
 ```
+`phone` is **required**: optional leading `+`, then 7–15 digits (spaces/dashes/parentheses are stripped server-side). Stored in the user's profile.
 Response `201` (email verification on — the normal case):
 ```json
 { "needsVerification": true, "message": "Account created! Check your email…" }
@@ -112,7 +114,7 @@ Response `201` (if email confirmation is disabled on Supabase):
 ```json
 { "needsVerification": false, "token": "jwt…", "refreshToken": "…", "message": "Account created!" }
 ```
-Errors: `400 {error}` (invalid email / password < 6 / `agree` not true),
+Errors: `400 {error}` (invalid email / password < 6 / invalid phone / `agree` not true),
 `429 {error}` (Supabase email rate limit).
 
 ### 3) POST `/auth/login` — public · rate‑limited 10/min
@@ -128,7 +130,8 @@ Errors: `401 { "error": "Invalid email or password." }`,
 Response `200`: `{ "ok": true }` (just drop the token client‑side).
 
 ### 5) GET `/auth/me` — auth
-Response `200`: `{ "id": "uuid", "email": "…", "role": "user" }`
+Response `200`: `{ "id": "uuid", "email": "…", "role": "user", "phone": "+60123456789" }`
+(`phone` is `null` for accounts created before the phone requirement.)
 
 ### 6) GET `/sessions` — auth
 Response `200`:

@@ -18,4 +18,4 @@ fine_tuning_chatbot/_pycache__/
 fine_tuning_chatbot/.ipynb_checkpoints
 fine_tuning_chatbot/results/predictions/*
 fine_tuning_chatbot/results/llm_judge/responses/*
-
+.vscode/

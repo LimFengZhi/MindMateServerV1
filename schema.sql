@@ -25,6 +25,8 @@ drop trigger if exists on_auth_user_created on auth.users;
 -- Tables first: dropping them (cascade) also removes their RLS policies, which
 -- depend on is_admin() — so the function drops below can't hit 2BP01.
 drop table if exists
+    public.bench_result,
+    public.bench_session,
     public.test_created,
     public.test,
     public.resource_steps,
@@ -55,20 +57,24 @@ create table public.profiles (
     id           uuid primary key references auth.users(id) on delete cascade,
     email        text,
     display_name text,
+    phone        text,   -- required at registration (validated by the API);
+                         -- nullable here so staff-created accounts don't break
     role         text not null default 'user'
                  check (role in ('user', 'staff', 'admin')),
     created_at   timestamptz not null default now()
 );
 
--- Auto-create a profile row whenever a new auth user is created.
+-- Auto-create a profile row whenever a new auth user is created. The phone
+-- number arrives via the signup metadata (register() passes options.data),
+-- so it lands here even before the email is verified.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
 begin
-    insert into public.profiles (id, email)
-    values (new.id, new.email)
+    insert into public.profiles (id, email, phone)
+    values (new.id, new.email, new.raw_user_meta_data->>'phone')
     on conflict (id) do nothing;
     return new;
 end;
@@ -263,6 +269,46 @@ create index idx_test_created_user on public.test_created(user_id, created_at de
 -- Self-test analytics aggregates attempts per test; also speeds cascades.
 create index idx_test_created_test on public.test_created(test_id);
 
+-- ---------------------------------------------------------------------------
+-- 8. bench_result: the staff "Test Chat" comparison bench. One row per model
+--    VARIANT per run (run_id groups them): 3-model comparisons and
+--    single-agent-vs-multi-agent runs, each ratable with feedback.
+--    (Normal "chat as a user" testing keeps using sessions/messages + the
+--    messages feedback columns — this table is only for comparison runs.)
+-- ---------------------------------------------------------------------------
+-- bench_session: a comparison CHAT (like a user session, but for the bench):
+-- multiple runs (turns) grouped under a renamable/deletable title, scoped to
+-- the staff member who created it. Each variant keeps its own conversation
+-- history across the session's turns.
+create table public.bench_session (
+    id         uuid primary key default gen_random_uuid(),
+    staff_id   uuid not null references auth.users(id) on delete cascade,
+    mode       text not null check (mode in ('models3', 'single_vs_multi')),
+    title      text not null default 'New comparison',
+    created_at timestamptz not null default now()
+);
+create index idx_bench_session_staff on public.bench_session(staff_id, created_at desc);
+
+create table public.bench_result (
+    id         uuid primary key default gen_random_uuid(),
+    staff_id   uuid not null references auth.users(id) on delete cascade,
+    session_id uuid references public.bench_session(id) on delete cascade,
+    run_id     uuid not null,            -- groups the variants of one run/turn
+    mode       text not null check (mode in ('models3', 'single_vs_multi')),
+    prompt     text not null,            -- the staff member's test message
+    variant    text not null,            -- gemma2|llama32|qwen3|single|multi
+    label      text,                     -- human-readable variant name
+    reply      text,                     -- null when the variant errored
+    error      text,                     -- load/inference failure, if any
+    latency_ms int,
+    rating     int check (rating between 1 and 5),
+    feedback   text,
+    created_at timestamptz not null default now()
+);
+
+create index idx_bench_result_created on public.bench_result(created_at desc);
+create index idx_bench_result_run on public.bench_result(run_id);
+
 -- ===========================================================================
 -- Row Level Security.
 -- The Flask backend uses the SERVICE key, which bypasses RLS, and enforces
@@ -279,6 +325,8 @@ alter table public.resources             enable row level security;
 alter table public.resource_steps        enable row level security;
 alter table public.test                  enable row level security;
 alter table public.test_created          enable row level security;
+alter table public.bench_result          enable row level security;
+alter table public.bench_session         enable row level security;
 
 -- profiles: a user sees/edits their own row; staff/admins see all.
 create policy profiles_select on public.profiles
@@ -322,6 +370,13 @@ create policy test_admin on public.test
     for all using (public.is_admin()) with check (public.is_admin());
 create policy test_created_own on public.test_created
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- bench results: staff/admin only (the backend enforces this via staff_required;
+-- this is defense-in-depth like every other policy here).
+create policy bench_result_staff on public.bench_result
+    for all using (public.is_admin()) with check (public.is_admin());
+create policy bench_session_staff on public.bench_session
+    for all using (public.is_admin()) with check (public.is_admin());
 
 -- ===========================================================================
 -- Bootstrap the first admin (run AFTER registering + verifying the account

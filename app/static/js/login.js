@@ -68,6 +68,12 @@ async function submitAuth() {
       setAuthMsg("Password must be at least 6 characters.", "error");
       return;
     }
+    // 7-15 digits once spaces/dashes are stripped (server re-validates).
+    const phoneDigits = $("phone").value.replace(/[ \-().]/g, "");
+    if (!/^\+?\d{7,15}$/.test(phoneDigits)) {
+      setAuthMsg("Please enter a valid phone number (e.g. +60123456789).", "error");
+      return;
+    }
     if (!$("agreeChk").checked) {
       setAuthMsg("Please accept the User Agreement to register.", "error");
       return;
@@ -85,7 +91,8 @@ async function submitAuth() {
     if (authMode === "register") {
       const r = await api("/auth/register", {
         method: "POST",
-        body: JSON.stringify({ email, password, agree: true }),
+        body: JSON.stringify({ email, password, agree: true,
+                               phone: $("phone").value.trim() }),
       });
       if (r.error) { setAuthMsg(r.error, "error"); return; }
 

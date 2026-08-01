@@ -251,6 +251,15 @@ a:hover { text-decoration: underline; }
 .s-actions button { background: transparent; border: 0; color: var(--muted); font-size: 12px; cursor: pointer; padding: 0; transition: color .15s; }
 .s-actions button:hover { color: var(--blue-bright); }
 
+/* Inline rename editor in the sidebar (replaces the blockable window.prompt). */
+.session-item.renaming { background: var(--surface); border-color: var(--border); cursor: default; }
+.session-item.renaming .s-actions { display: flex; }
+.rename-input {
+  width: 100%; padding: 6px 8px; border-radius: 8px; font-size: 14px;
+  background: var(--surface-2); border: 1px solid rgba(79,140,255,.45);
+  color: var(--text); outline: none;
+}
+
 .sidebar-foot { padding: 10px; border-top: 1px solid var(--border); flex: 0 0 auto; }
 .sidebar-foot .btn { display: flex; align-items: center; justify-content: center; gap: 8px; }
 
@@ -304,6 +313,19 @@ a:hover { text-decoration: underline; }
 }
 .panel-body { padding: 18px; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .placeholder { color: var(--faint); font-style: italic; }
+
+/* Soft centered welcome — the empty state of a fresh chat (not a message). */
+.welcome-msg {
+  flex: 1 1 auto; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  gap: 6px; padding: 24px; animation: rise .3s ease both;
+}
+.welcome-msg h2 {
+  margin: 0; font-size: 24px; font-weight: 650;
+  background: var(--accent-grad);            /* theme blue -> purple */
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.welcome-msg p { margin: 0; font-size: 14.5px; color: var(--muted); }
 
 /* chat bubbles */
 .msg { display: flex; animation: rise .25s ease both; }

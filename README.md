@@ -90,9 +90,29 @@ agreement, the agents' prompts, and the self-tests (missing tests are also
 topped up on later boots — no action needed).
 
 ### First use
-1. Go to **Register**, read the **User Agreement**, tick the box, and sign up.
+1. Go to **Register**, enter your **email, password and phone number**, read
+   the **User Agreement**, tick the box, and sign up.
 2. Check your email and click the verification link.
 3. Come back and **Log in**.
+
+### Resetting the database (full wipe)
+`schema.sql` is a **reset script**: running it drops every app table **and
+deletes every auth account**. After a reset, nothing from before exists —
+including your admin login. Full checklist, in order:
+
+1. Paste the whole of `schema.sql` into the **Supabase SQL editor** and run it.
+2. Restart the app (`python run.py`) — it re-seeds the user agreement, the
+   agent prompts, and the self-tests automatically.
+3. Re-upload the Resources content: `python scripts/scrape_resources.py`.
+4. **Re-create your admin login:** register a fresh account in the app
+   (email + password + phone), verify the email, then promote it in the
+   Supabase SQL editor:
+   ```sql
+   update public.profiles set role = 'admin' where email = 'you@example.com';
+   ```
+5. Log in as admin via the login page's **"Login as staff →"** link
+   (`/admin/login`). From there, further staff accounts are created in the
+   dashboard — no more SQL needed.
 
 ---
 
@@ -100,7 +120,7 @@ topped up on later boots — no action needed).
 
 | Mode | Behaviour |
 |------|-----------|
-| `stub` (default) | Lightweight rule-based agents. Boots instantly, no model downloads. The full pipeline (diagnostic → routing → summarise → chatbot) still runs, and **crisis escalation still works** (lexical safety net). |
+| `stub` (default) | Lightweight rule-based agents. Boots instantly, no model downloads. The full LangGraph pipeline (diagnose → route → summarise → generate) still runs, and **crisis escalation still works** (lexical safety net). |
 | `real` | Loads the local models in `models/` (Gemma2 chatbot, RoBERTa emotion classifier) and Qwen summariser. If any model fails to load, that component **falls back to its stub** automatically — the app keeps running. |
 
 Voice (speech-to-text) uses **faster-whisper** and works in either mode once the
@@ -130,9 +150,15 @@ Every user gets the `user` role automatically (via the `profiles` table).
   - **User Sessions** — pick a user → pick a chat → review the transcript with
     per-reply diagnostics; **rate each bot reply (1–5 ★), leave feedback**, and
     **export the session as JSON**
-  - **Testing** — a multi-agent test bench (`/admin/testing/multi-agent`) that
-    chats through the real pipeline on the staff member's own account, with the
-    same rating/feedback controls and JSON export
+  - **Test Chat** — three testing types, all ratable (1–5 + feedback):
+    *Normal (chat as a user)* — the multi-agent test bench
+    (`/admin/testing/multi-agent`) chatting through the real pipeline on the
+    staff member's own account; *Single vs Multi-agent* — the same Gemma 2
+    weights answering alone vs through the full pipeline; *Three Models* — the
+    same message answered by Gemma 2, Llama 3.2 and Qwen3 (the two extra
+    models lazy-load on first run). Comparison runs live in renamable/
+    deletable bench sessions; ratings are stored in the `bench_session` /
+    `bench_result` tables (part of `schema.sql`)
 - **admin** — everything staff can, plus **create/remove staff accounts by
   email** from the dashboard.
 
@@ -191,10 +217,14 @@ MultiAgent2/
    ├─ auth/                 Supabase email-verified auth + route guards
    ├─ db/                   repo.py (user queries) · admin_repo.py (admin queries)
    │                        · seed.py (boot seeding)
-   ├─ ml/                   model registry (env-toggle + graceful fallback)
-   ├─ agents/               diagnostic, routing, summarize, chatbot, voice
-   ├─ prompt_builder/       system-prompt templates (DB-backed, file fallback)
-   ├─ chat/                 multi-agent orchestrator + chat/voice routes
+   ├─ agents/               the chat pipeline — LangChain components +
+   │                        LangGraph control flow: state, guards, stubs,
+   │                        chat_models (LocalChatModel), prompts, chains
+   │                        (prompt|llm|parser + retry/fallback policies),
+   │                        nodes, graph (answer entry point), voice,
+   │                        registry (model loading), prompt_loader +
+   │                        prompt/ (DB-backed system prompts, .txt seed)
+   ├─ chat/                 chat/voice HTTP routes (invoke the graph)
    ├─ sessions/             session CRUD + transcript + emotion analysis
    ├─ resources/            resources API + self_test/ (definitions, scoring)
    ├─ agreements/           active user-agreement API
@@ -210,7 +240,7 @@ MultiAgent2/
 
 ### Editing the agents' prompts
 The chatbot/summarizer system prompts live in the **`prompts`** table (seeded on
-first boot from `app/prompt_builder/prompt/*.txt`). Edit them in the Supabase
+first boot from `app/agents/prompt/*.txt`). Edit them in the Supabase
 dashboard (Table editor → `prompts` → edit the `content` of `composed` /
 `summarise`); changes take effect within ~15 seconds, no restart needed. If the
 table is empty or unreachable, the app falls back to the bundled `.txt` files.

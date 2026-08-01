@@ -9,15 +9,24 @@
    =========================================================================== */
 
 let mySessions = [];  // ALL of this staff member's sessions (tests + own chats)
-let currentID = null;
-let currentTitle = null;
+let currentID = null; // null = blank chat; the session is created LAZILY on
+let currentTitle = null;                 // the first send (like the user chat)
 let sending = false;
+
+// Same empty state as the user chat, so the bench feels identical to it.
+const TEST_WELCOME_HTML = `
+  <div class="welcome-msg">
+    <h2>What is on your mind?</h2>
+    <p>Test messages run through the REAL pipeline on your own account —
+       every reply can be rated below it.</p>
+  </div>`;
 
 if (requireAuth()) initTestPage();
 
 async function initTestPage() {
   const me = await requireStaff();
   if (!me) return;
+  newTestChat();          // composer is usable immediately — no clicking first
   loadMySessions();
 }
 
@@ -69,18 +78,33 @@ async function openTestSession(id) {
   chat.scrollTop = chat.scrollHeight;
 }
 
-async function startTestChat() {
+function newTestChat() {
+  // Blank state only — NO session row yet. Creating on click used to insert
+  // an empty "New chat" into the DB (and the sidebar) every time; the session
+  // now appears when the first message is sent, exactly like the user chat.
+  currentID = null;
+  currentTitle = null;
+  $("testSessionTitle").textContent = "New chat";
+  $("renameTestBtn").disabled = true;
+  $("exportTestBtn").disabled = true;
+  cancelRename();
+  $("testChat").innerHTML = TEST_WELCOME_HTML;
+  renderTestSessionList();
+  enableComposer(true);
+}
+
+// Create the session row for the blank chat (called by the first send).
+async function ensureTestSession() {
   const r = await api("/sessions", {
     method: "POST",
     body: JSON.stringify({ title: "New chat" }),
   });
-  if (r.error) { alert(r.error); return; }
+  if (r.error) { alert(r.error); return false; }
   mySessions.unshift({ sessionID: r.sessionID, title: r.title, createdAt: r.createdAt });
   currentID = r.sessionID;
   setTestTitle(r.title);
   renderTestSessionList();
-  showPlaceholder($("testChat"), "Send a message below to start testing.");
-  enableComposer(true);
+  return true;
 }
 
 function setTestTitle(title) {
@@ -98,7 +122,7 @@ function enableComposer(on) {
 
 /* ===================== CHAT BUBBLES (like the real app) ===================== */
 function clearChatPlaceholder() {
-  const ph = $("testChat").querySelector(":scope > .placeholder");
+  const ph = $("testChat").querySelector(":scope > .placeholder, :scope > .welcome-msg");
   if (ph) ph.remove();
 }
 
@@ -135,11 +159,12 @@ async function sendTestMessage() {
   if (sending) return;
   const ta = $("testMessage");
   const message = ta.value.trim();
-  if (!message || !currentID) return;
+  if (!message) return;
 
   sending = true;
   $("testSendBtn").disabled = true;
   try {
+    if (!currentID && !(await ensureTestSession())) return;
     ta.value = "";
     appendUserBubble(message);
     const load = appendLoadingBubble();

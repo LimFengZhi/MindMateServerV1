@@ -70,20 +70,24 @@ def _seed_tests(sb):
 
 
 def _seed_prompts(sb):
-    """Seed the agents' system prompts from the bundled .txt defaults so they can
-    be edited in the Supabase dashboard afterwards."""
-    existing = sb.table("prompts").select("key").limit(1).execute()
-    if existing.data:
-        return
-    from app.prompt_builder.loader import bundled_prompt
-    rows = [
-        {"key": "composed", "content": bundled_prompt("composed"),
-         "description": "Chatbot system prompt. Placeholders: {diagnostic_label}, {summarised_history}."},
-        {"key": "summarise", "content": bundled_prompt("summarise"),
-         "description": "Summarize-agent instruction prompt."},
-    ]
-    sb.table("prompts").insert(rows).execute()
-    print(f"[seed] inserted {len(rows)} agent prompts")
+    """Seed the agents' system prompts from the bundled .txt defaults so they
+    can be edited in the dashboard afterwards. TOPS UP like the self-tests:
+    any key missing from the table is inserted (existing rows untouched), so
+    new prompts reach existing databases without a reset."""
+    from app.agents.prompt_loader import bundled_prompt
+    descriptions = {
+        "composed": "Chatbot system prompt. Placeholders: {diagnostic_label}, {summarised_history}.",
+        "summarise": "Summarize-agent instruction prompt.",
+        "single": "Test Chat bench: single-agent baseline (composed rules WITHOUT the summary/memory parts).",
+    }
+    existing = sb.table("prompts").select("key").execute()
+    have = {r["key"] for r in (existing.data or [])}
+    rows = [{"key": key, "content": bundled_prompt(key),
+             "description": desc}
+            for key, desc in descriptions.items() if key not in have]
+    if rows:
+        sb.table("prompts").insert(rows).execute()
+        print(f"[seed] inserted {len(rows)} agent prompts")
 
 
 def _seed_agreement(sb):

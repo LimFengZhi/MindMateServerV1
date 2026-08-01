@@ -19,7 +19,7 @@
 
     <div class="test-layout">
       <aside class="test-sidebar">
-        <button class="btn btn-primary btn-block" onclick="startTestChat()">＋ New chat</button>
+        <button class="btn btn-primary btn-block" onclick="newTestChat()">＋ New chat</button>
         <div class="side-label">My chats</div>
         <div id="testSessionList" class="session-list"><p class="placeholder">Loading…</p></div>
       </aside>
@@ -41,15 +41,17 @@
         </div>
 
         <div id="testChat">
-          <p class="placeholder">Start a new test chat, or open one from the history.
-            Messages run through the real pipeline (diagnostic → crisis routing →
-            summariser → chatbot) under your own account.</p>
+          <div class="welcome-msg">
+            <h2>What is on your mind?</h2>
+            <p>Test messages run through the REAL pipeline on your own account —
+               every reply can be rated below it.</p>
+          </div>
         </div>
 
         <footer class="test-composer">
-          <textarea id="testMessage" rows="1" placeholder="Type a test message…" disabled
+          <textarea id="testMessage" rows="1" placeholder="Type a test message…"
             onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendTestMessage();}"></textarea>
-          <button class="btn btn-primary" id="testSendBtn" disabled onclick="sendTestMessage()">Send</button>
+          <button class="btn btn-primary" id="testSendBtn" onclick="sendTestMessage()">Send</button>
         </footer>
       </div>
     </div>

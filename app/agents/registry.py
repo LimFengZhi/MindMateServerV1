@@ -116,6 +116,39 @@ class ModelRegistry:
         self.summarizer_llm.eval()
         print("[ml] summarizer ready.")
 
+    def load_bench_model(self, key):
+        """LAZY loader for an extra Test Chat comparison LLM (llama32/qwen3).
+        Nothing loads at boot — only the first '3 Models' bench run pays the
+        cost. Returns True when ready; a failed load (missing weights, OOM,
+        stub mode) returns False and the bench shows a per-variant error."""
+        if getattr(self, f"bench_{key}_ready", False):
+            return True
+        if not self.real_mode:
+            return False  # stub mode: comparison models are never loaded
+        path = Config.BENCH_MODEL_PATHS.get(key)
+        if not path:
+            return False
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            device = _resolve_device(Config.CHATBOT_DEVICE)
+            dtype = _resolve_dtype(Config.CHATBOT_DTYPE, device)
+            print(f"[ml] lazy-loading bench model '{key}' on {device} ({dtype})...")
+            tok = AutoTokenizer.from_pretrained(path)
+            llm = AutoModelForCausalLM.from_pretrained(
+                path, torch_dtype=dtype,
+                attn_implementation="sdpa" if device == "cuda" else "eager",
+            ).to(device)
+            llm.eval()
+            setattr(self, f"bench_{key}_tok", tok)
+            setattr(self, f"bench_{key}_llm", llm)
+            setattr(self, f"bench_{key}_ready", True)
+            print(f"[ml] bench model '{key}' ready.")
+            return True
+        except Exception as e:
+            print(f"[ml] bench model '{key}' unavailable. ({type(e).__name__}: {e})")
+            setattr(self, f"bench_{key}_ready", False)
+            return False
+
     def load_voice(self):
         """Voice is independent of AI_MODE — it works whenever faster-whisper is
         installed. Returns True if the model is ready. A failed load is only
@@ -144,6 +177,10 @@ class ModelRegistry:
     # ------------------------------------------------------------------ cleanup
     def free_all(self):
         print("[ml] freeing models...")
+        for key in Config.BENCH_MODEL_PATHS:
+            setattr(self, f"bench_{key}_tok", None)
+            setattr(self, f"bench_{key}_llm", None)
+            setattr(self, f"bench_{key}_ready", False)
         self.chatbot_tok = self.chatbot_llm = None
         self.clf_tok = self.clf_model = None
         self.summarizer_tok = self.summarizer_llm = None

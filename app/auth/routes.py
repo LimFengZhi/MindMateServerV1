@@ -5,13 +5,17 @@ from flask import Blueprint, request, jsonify, g
 from app.auth import service
 from app.auth.service import AuthError
 from app.auth.decorators import login_required
-from app.db.repo import get_role, get_active_agreement, record_agreement_acceptance
+from app.db.repo import (
+    get_profile, get_role, get_active_agreement, record_agreement_acceptance,
+)
 from app.extensions import limiter
 from app.http_utils import json_error
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Optional leading +, then 7-15 digits (spaces/dashes are stripped first).
+PHONE_RE = re.compile(r"^\+?\d{7,15}$")
 
 
 def _read_credentials():
@@ -19,6 +23,13 @@ def _read_credentials():
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
     return data, email, password
+
+
+def _normalize_phone(raw):
+    """Strip spaces/dashes/parentheses; return the normalized number or None
+    if what's left isn't a plausible phone number."""
+    cleaned = re.sub(r"[ \-().]", "", (raw or "").strip())
+    return cleaned if PHONE_RE.match(cleaned) else None
 
 
 @auth_bp.post("/register")
@@ -29,11 +40,15 @@ def register():
         return json_error("A valid email address is required.", 400)
     if len(password) < 6:
         return json_error("Password must be at least 6 characters.", 400)
+    phone = _normalize_phone(data.get("phone"))
+    if not phone:
+        return json_error("A valid phone number is required "
+                          "(7-15 digits, e.g. +60123456789).", 400)
     if not data.get("agree"):
         return json_error("You must accept the User Agreement to register.", 400)
 
     try:
-        result = service.register(email, password)
+        result = service.register(email, password, phone=phone)
     except AuthError as e:
         return json_error(e.message, e.status)
 
@@ -91,8 +106,10 @@ def logout():
 @auth_bp.get("/me")
 @login_required
 def me():
+    profile = get_profile(g.user["id"]) or {}
     return jsonify({
         "id": g.user["id"],
         "email": g.user["email"],
-        "role": get_role(g.user["id"]),
+        "role": profile.get("role", "user"),
+        "phone": profile.get("phone"),
     })

@@ -11,8 +11,9 @@
 Flask>=3.0
 Flask-Limiter>=3.5          # optional; app degrades gracefully without it
 
-# --- Config ---
+# --- Config (.env secrets + config.yaml app tuning) ---
 python-dotenv>=1.0
+PyYAML>=6.0
 
 # --- Database / Auth ---
 supabase>=2.0              # Supabase Python client (Postgres + GoTrue auth)
@@ -20,6 +21,10 @@ supabase>=2.0              # Supabase Python client (Postgres + GoTrue auth)
 # --- Resource importer (scripts/scrape_resources.py) ---
 requests>=2.31
 beautifulsoup4>=4.12
+
+# --- Agent orchestration (the chat pipeline is a LangGraph state machine) ---
+langgraph>=1.0
+langchain-core>=1.0
 
 # --- AI / inference (only loaded when AI_MODE=real) ---
 transformers>=4.44

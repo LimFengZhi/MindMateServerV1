@@ -3,7 +3,14 @@
    Sections: init · sessions · messages · bubble builders · voice
    =========================================================================== */
 
-const CHAT_PLACEHOLDER = "Ask something below to start the conversation.";
+// Soft centered welcome (ChatGPT-style empty state) for a fresh/empty chat.
+// NOT a message: never persisted, never bubble-styled, and it disappears the
+// moment the conversation starts (greetings go through the normal pipeline).
+const WELCOME_HTML = `
+  <div class="welcome-msg">
+    <h2>What is on your mind?</h2>
+    <p>Peer Counseling Support</p>
+  </div>`;
 
 let sessions = [];
 let sessionID = null; // created lazily on the first message (fresh chat per login)
@@ -94,23 +101,47 @@ async function createSession(title) {
   return true;
 }
 
+// Session being renamed inline. No window.prompt — browsers/extensions can
+// block those dialogs, which made the Rename button look dead (same fix the
+// admin test bench got earlier).
+let renamingID = null;
+
 function renderSessionList() {
   const list = $("sessionList");
   if (!sessions.length) {
     list.innerHTML = placeholderHTML("No chats yet.");
     return;
   }
-  list.innerHTML = sessions.map((s) => `
+  list.innerHTML = sessions.map((s) =>
+    s.sessionID === renamingID ? renameRowHTML(s) : `
     <div class="session-item ${s.sessionID === sessionID ? "active" : ""}"
          onclick="openSession('${s.sessionID}', true)">
       <div class="s-title">${escapeHTML(s.title || "New chat")}</div>
       <div class="s-date">${escapeHTML(fmtDate(s.createdAt))}${s.mode === "experiment"
         ? ' · <span class="s-supervised">supervised</span>' : ""}</div>
       <div class="s-actions">
-        <button onclick="event.stopPropagation(); renamePrompt('${s.sessionID}')">Rename</button>
+        <button onclick="event.stopPropagation(); startRename('${s.sessionID}')">Rename</button>
         <button onclick="event.stopPropagation(); deleteSession('${s.sessionID}')">Delete</button>
       </div>
     </div>`).join("");
+  if (renamingID) {
+    const input = $("renameInput");
+    if (input) { input.focus(); input.select(); }
+  }
+}
+
+function renameRowHTML(s) {
+  return `
+    <div class="session-item renaming" onclick="event.stopPropagation()">
+      <input id="renameInput" class="rename-input" maxlength="80"
+        value="${escapeHTML(s.title || "New chat")}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault(); saveRename('${s.sessionID}');}
+                   else if(event.key==='Escape'){cancelRename();}" />
+      <div class="s-actions">
+        <button onclick="event.stopPropagation(); saveRename('${s.sessionID}')">Save</button>
+        <button onclick="event.stopPropagation(); cancelRename()">Cancel</button>
+      </div>
+    </div>`;
 }
 
 async function newChat() {
@@ -152,16 +183,26 @@ async function openSession(id, fromClick) {
   if (fromClick && isMobileViewport()) closeSidebar();
 }
 
-async function renamePrompt(id) {
-  const s = sessions.find((x) => x.sessionID === id);
-  const title = prompt("Rename chat:", s ? s.title : "");
-  if (title == null) return;
-  const trimmed = title.trim();
-  if (!trimmed) return;
+function startRename(id) {
+  renamingID = id;
+  renderSessionList();
+}
+
+function cancelRename() {
+  renamingID = null;
+  renderSessionList();
+}
+
+async function saveRename(id) {
+  const input = $("renameInput");
+  const trimmed = input ? input.value.trim() : "";
+  if (!trimmed) { cancelRename(); return; }
   const r = await api(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title: trimmed }) });
   if (r.error) { alert(r.error); return; }
+  const s = sessions.find((x) => x.sessionID === id);
   if (s) s.title = r.title;
   if (id === sessionID) $("currentSessionTitle").textContent = r.title;
+  renamingID = null;
   renderSessionList();
 }
 
@@ -306,13 +347,13 @@ document.addEventListener("input", (e) => {
 
 /* ===================== BUBBLE BUILDERS ===================== */
 function clearPanels() {
-  $("chatPanel").innerHTML = placeholderHTML(CHAT_PLACEHOLDER);
+  $("chatPanel").innerHTML = WELCOME_HTML;
 }
 
 function clearPlaceholder() {
-  // Only the panel's own placeholder — never the "thinking…" span nested
-  // inside a pending loading bubble.
-  const ph = $("chatPanel").querySelector(":scope > .placeholder");
+  // Only the panel's own empty state (placeholder text or the welcome
+  // bubble) — never the "thinking…" span nested inside a loading bubble.
+  const ph = $("chatPanel").querySelector(":scope > .placeholder, :scope > .welcome-msg");
   if (ph) ph.remove();
 }
 

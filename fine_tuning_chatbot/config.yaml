@@ -1,6 +1,9 @@
 # ===========================================================================
 # Central configuration for the mental-health counseling chatbot
-# QLoRA fine-tuning study (3 models x 2 datasets).
+# QLoRA fine-tuning study (3 models x 1 dataset: MentalChat16K).
+# Loss is computed on the REPLY ONLY (completion-only), with no system prompt
+# in training — the deployment prompt arrives as a novel instruction at
+# inference, preserving the base model's instruction-following.
 #
 # Every script resolves models, datasets, and paths from this file via
 # chatbot_trainer/config.py — no script hardcodes a model id, dataset id,
@@ -15,15 +18,6 @@ paths:
   data_root: ../data/mh_conversation
   models_root: ../models/chat_models
   results_root: results
-
-# Shared system instruction — identical for all models and datasets.
-# It is stored into every processed record's messages, so the processed
-# JSONL files are the exact, self-contained training input of the study.
-system_prompt: >-
-  You are a supportive, empathetic mental health counseling assistant.
-  Respond with warmth and care. If the user expresses thoughts of self-harm
-  or suicide, gently encourage them to reach out to a crisis line or mental
-  health professional rather than attempting to resolve it yourself.
 
 # ---------------------------------------------------------------------------
 # Models (verified on HF 2026-07-17; all six repos exist)
@@ -61,27 +55,6 @@ methods: [qlora]
 # Datasets
 # ---------------------------------------------------------------------------
 datasets:
-  amod:
-    name: "Mental Health Counseling Conversations (Amod)"
-    hf_id: Amod/mental_health_counseling_conversations
-    # Pinned repo revision (verified 2026-07-17) so record ids stay stable
-    # across --force runs even if the upstream dataset changes.
-    revision: d7e86f0813c5690181b41f97403c3674aa55dcef
-    raw_filename: dataset_A_combined_dataset.json
-    license: >-
-      RAIL-D (non-commercial/research use royalty-free; commercial use requires
-      a donation to the CCC Foundation per the dataset card; redistribution only
-      unmodified). Cleaned copies in data/ are private preprocessing artifacts,
-      not redistributed.
-    # Single-turn Q&A scraped from CounselChat: real help-seeker questions,
-    # real licensed-therapist answers. The SAME question appears up to 94
-    # times with different therapist answers (995 unique contexts / 3512
-    # rows), so the split must be grouped by question to avoid leakage.
-    schema:
-      user_field: Context
-      assistant_field: Response
-    group_split_by_user_text: true
-
   mentalchat16k:
     name: "MentalChat16K (ShenLab)"
     hf_id: ShenLab/MentalChat16K
@@ -122,21 +95,6 @@ split:
     test: 0.10
 
 # ---------------------------------------------------------------------------
-# Curated crisis-scenario training examples (safety preservation)
-# ---------------------------------------------------------------------------
-# Hand-written examples covering suicidal ideation, self-harm, abuse
-# disclosure, and medical/diagnostic-advice requests, each paired with an
-# escalation/boundary response consistent with the deployed app's crisis
-# message (Befrienders KL / 988 / Samaritans contact block). Injected into
-# the TRAIN split only, n_copies times each, then shuffled. They never
-# enter val/test, and the safety-eval prompt set (stage 3) is disjoint
-# from them by construction.
-crisis_examples:
-  inject: true
-  file: crisis_examples.json
-  n_copies: 3
-
-# ---------------------------------------------------------------------------
 # Training defaults (stage 2 — carried over from the prior study's
 # train_config.py; every train script reads these, CLI can override)
 # ---------------------------------------------------------------------------
@@ -148,9 +106,9 @@ training:
   per_device_train_batch_size: 2
   per_device_eval_batch_size: 8
   gradient_accumulation_steps: 4
-  learning_rate: 2.0e-4
+  learning_rate: 1.0e-4
   lr_scheduler_type: cosine
-  warmup_steps: 50   # ~8% of the amod run, ~1% of mentalchat16k (300 was 45% of amod's 663 steps)
+  warmup_steps: 50
   bf16: true
   logging_steps: 100
   eval_strategy: epoch

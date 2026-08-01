@@ -359,22 +359,212 @@ def delete_test(test_id):
 
 
 # ---------------------------------------------------------------------------
+# Test Chat bench results (staff)
+# ---------------------------------------------------------------------------
+class BenchTableMissing(Exception):
+    """bench_result doesn't exist yet (additive migration not run). Routes
+    surface a clear instruction instead of a 500."""
+
+
+def _raise_if_bench_missing(e):
+    msg = str(e)
+    if ("bench_result" in msg or "bench_session" in msg or "session_id" in msg) \
+            and ("PGRST205" in msg or "PGRST204" in msg or "42P01" in msg
+                 or "42703" in msg or "does not exist" in msg
+                 or "find the table" in msg.lower()
+                 or "find the" in msg.lower()):
+        raise BenchTableMissing() from e
+
+
+# ---- bench sessions (comparison chats: renamable/deletable, per staff) ----
+def create_bench_session(staff_id, mode):
+    try:
+        res = (get_sb().table("bench_session")
+               .insert({"staff_id": staff_id, "mode": mode})
+               .execute())
+    except APIError as e:
+        _raise_if_bench_missing(e)
+        raise
+    return res.data[0]
+
+
+def list_bench_sessions(staff_id):
+    try:
+        res = (_retry_once(lambda: get_sb().table("bench_session")
+                           .select("id, mode, title, created_at")
+                           .eq("staff_id", staff_id)
+                           .order("created_at", desc=True)
+                           .execute()))
+    except APIError as e:
+        _raise_if_bench_missing(e)
+        raise
+    return res.data or []
+
+
+def get_bench_session(staff_id, session_id):
+    try:
+        res = (get_sb().table("bench_session")
+               .select("id, mode, title, created_at")
+               .eq("id", session_id).eq("staff_id", staff_id)
+               .limit(1).execute())
+    except APIError as e:
+        _raise_if_bench_missing(e)
+        return _none_if_bad_uuid(e)
+    return res.data[0] if res.data else None
+
+
+def rename_bench_session(staff_id, session_id, title):
+    res = (get_sb().table("bench_session")
+           .update({"title": title})
+           .eq("id", session_id).eq("staff_id", staff_id)
+           .execute())
+    return res.data[0] if res.data else None
+
+
+def delete_bench_session(staff_id, session_id):
+    # variant rows go with it via the session_id ON DELETE CASCADE.
+    (get_sb().table("bench_session")
+     .delete()
+     .eq("id", session_id).eq("staff_id", staff_id)
+     .execute())
+
+
+def _bench_session_rows(session_id):
+    return (_retry_once(lambda: get_sb().table("bench_result")
+                        .select("id, run_id, prompt, variant, label, reply, "
+                                "error, latency_ms, rating, feedback, created_at")
+                        .eq("session_id", session_id)
+                        .order("created_at", desc=False)
+                        .execute())).data or []
+
+
+def get_bench_turns(session_id):
+    """The session's runs as ordered turns: [{runID, prompt, results: [...]}]."""
+    turns, by_run = [], {}
+    for r in _bench_session_rows(session_id):
+        turn = by_run.get(r["run_id"])
+        if turn is None:
+            turn = by_run[r["run_id"]] = {
+                "runID": r["run_id"], "prompt": r["prompt"],
+                "createdAt": r["created_at"], "results": []}
+            turns.append(turn)
+        turn["results"].append({
+            "benchID": r["id"], "variant": r["variant"], "label": r["label"],
+            "reply": r["reply"], "error": r["error"],
+            "latencyMs": r["latency_ms"], "rating": r["rating"],
+            "feedback": r["feedback"],
+        })
+    return turns
+
+
+def get_bench_histories(session_id):
+    """Per-variant conversation history for the next turn:
+    {variant: [(prompt, reply), ...]} — error turns are skipped."""
+    histories = {}
+    for r in _bench_session_rows(session_id):
+        if r.get("reply"):
+            histories.setdefault(r["variant"], []).append((r["prompt"], r["reply"]))
+    return histories
+
+
+def save_bench_results(staff_id, run_id, mode, prompt, results, session_id=None):
+    """One row per variant (error variants included, for a complete log).
+    Returns {variant: bench row id} so the UI can attach ratings."""
+    rows = [{
+        "staff_id": staff_id, "run_id": run_id, "mode": mode, "prompt": prompt,
+        "variant": r["variant"], "label": r.get("label"),
+        "reply": r.get("reply"), "error": r.get("error"),
+        "latency_ms": r.get("latencyMs"),
+        **({"session_id": session_id} if session_id else {}),
+    } for r in results]
+    try:
+        res = get_sb().table("bench_result").insert(rows).execute()
+    except APIError as e:
+        _raise_if_bench_missing(e)
+        raise
+    return {row["variant"]: row["id"] for row in (res.data or [])}
+
+
+def set_bench_feedback(bench_id, rating=None, feedback=None):
+    """Attach a rating (1-5) and/or feedback text to one bench variant row."""
+    update = {}
+    if rating is not None:
+        update["rating"] = rating
+    if feedback is not None:
+        update["feedback"] = feedback
+    try:
+        res = (get_sb().table("bench_result")
+               .update(update)
+               .eq("id", bench_id)
+               .execute())
+    except APIError as e:
+        _raise_if_bench_missing(e)
+        return _none_if_bad_uuid(e)
+    return res.data[0] if res.data else None
+
+
+def list_bench_results(limit=40):
+    """Recent bench rows, newest first (the Test Chat history panel)."""
+    try:
+        res = (_retry_once(lambda: get_sb().table("bench_result")
+                           .select("id, run_id, mode, prompt, variant, label, "
+                                   "reply, error, latency_ms, rating, feedback, "
+                                   "created_at")
+                           .order("created_at", desc=True)
+                           .limit(limit)
+                           .execute()))
+    except APIError as e:
+        _raise_if_bench_missing(e)
+        raise
+    return res.data or []
+
+
+# ---------------------------------------------------------------------------
+# Dashboard activity (staff)
+# ---------------------------------------------------------------------------
+def get_daily_activity(days=14):
+    """Chatbot usage for the dashboard graphs: one entry per calendar day
+    (UTC, oldest first, zero-filled) with the number of user messages and how
+    many of them escalated to a crisis response."""
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    since = today - timedelta(days=days - 1)
+    rows = (_retry_once(lambda: get_sb().table("messages")
+                        .select("created_at, escalated")
+                        .gte("created_at", since.isoformat())
+                        .execute())).data or []
+    per_day = {(since + timedelta(days=i)).isoformat(): {"messages": 0, "escalations": 0}
+               for i in range(days)}
+    for r in rows:
+        day = (r.get("created_at") or "")[:10]
+        if day in per_day:
+            per_day[day]["messages"] += 1
+            if r.get("escalated"):
+                per_day[day]["escalations"] += 1
+    return [{"date": d, **counts} for d, counts in sorted(per_day.items())]
+
+
+# ---------------------------------------------------------------------------
 # Test analytics (staff)
 # ---------------------------------------------------------------------------
 def _test_attempt_rows():
-    """Completed attempts with the owning test's title (FK-embedded)."""
+    """Completed attempts with the owning test's id + title (FK-embedded).
+    _retry_once absorbs dropped pooled connections (same as the other admin
+    reads); anything else degrades to an empty list, not a 500."""
     try:
-        res = (get_sb().table("test_created")
-               .select("score, band, created_at, test(title)")
-               .execute())
+        res = _retry_once(lambda: get_sb().table("test_created")
+                          .select("score, band, created_at, test(id, title)")
+                          .execute())
         return res.data or []
     except Exception:
         return []
 
 
 def get_test_analytics():
-    """Per-test aggregate: {title: {total_takes, total_score, avg_score,
-    bands: {band: count}}}. Attempts whose test was deleted are skipped."""
+    """Per-test aggregate: {title: {test_id, total_takes, total_score,
+    avg_score, bands: {band: count}}}. `test_id` lets the dashboard fetch that
+    test's individual attempt logs. Attempts whose test was deleted are
+    skipped."""
     analytics = {}
     for row in _test_attempt_rows():
         test_info = row.get("test")
@@ -382,7 +572,8 @@ def get_test_analytics():
             continue
         title = test_info.get("title", "Unknown Assessment")
         stats = analytics.setdefault(
-            title, {"total_takes": 0, "total_score": 0, "bands": {}})
+            title, {"test_id": test_info.get("id"),
+                    "total_takes": 0, "total_score": 0, "bands": {}})
         stats["total_takes"] += 1
         stats["total_score"] += row.get("score") or 0
         band = row.get("band") or "Unscored"
@@ -392,3 +583,50 @@ def get_test_analytics():
         takes = stats["total_takes"]
         stats["avg_score"] = round(stats["total_score"] / takes, 1) if takes else 0
     return analytics
+
+
+def get_test_attempts(test_id, limit=200):
+    """Individual attempt logs for one test, newest first: who took it, when,
+    the score/band, and the ANSWER PICKED FOR EVERY QUESTION (index resolved
+    against the test's current questions — if staff edited the test after an
+    attempt, unresolvable picks are labelled instead of guessed)."""
+    try:
+        test_res = (get_sb().table("test")
+                    .select("id, title, questions")
+                    .eq("id", test_id).limit(1).execute())
+    except APIError as e:
+        return _none_if_bad_uuid(e)
+    if not test_res.data:
+        return None
+    questions = test_res.data[0].get("questions") or []
+
+    rows = (_retry_once(lambda: get_sb().table("test_created")
+                        .select("id, user_id, answer, score, band, created_at")
+                        .eq("test_id", test_id)
+                        .order("created_at", desc=True)
+                        .limit(limit)
+                        .execute())).data or []
+    emails = _emails_by_user()
+
+    attempts = []
+    for r in rows:
+        picks = []
+        for qi, ans in enumerate(r.get("answer") or []):
+            q = questions[qi] if qi < len(questions) else None
+            options = (q or {}).get("options") or []
+            opt = options[ans] if isinstance(ans, int) and 0 <= ans < len(options) else None
+            picks.append({
+                "question": (q or {}).get("text") or f"(question {qi + 1} was removed)",
+                "answer": (opt or {}).get("label", "(option no longer exists)"),
+                "value": (opt or {}).get("value"),
+            })
+        attempts.append({
+            "attemptID": r["id"],
+            "email": emails.get(r.get("user_id"), "unknown user"),
+            "score": r.get("score"),
+            "band": r.get("band"),
+            "createdAt": r.get("created_at"),
+            "picks": picks,
+        })
+    return {"testID": test_id, "title": test_res.data[0].get("title"),
+            "attempts": attempts}

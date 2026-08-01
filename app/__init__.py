@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, redirect, request, send_from_
 from app.config import Config
 from app.extensions import limiter
 from app.http_utils import json_error
-from app.ml.registry import registry
+from app.agents.registry import registry
 
 
 def create_app(load_models=True, seed=True):

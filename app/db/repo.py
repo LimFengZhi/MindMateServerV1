@@ -237,7 +237,7 @@ def _reply_extras(row):
     """Turn metadata shared by transcript + pending payloads: the suggested
     Suicide Risk Check link is derived from the persisted emotion/confidence/
     escalated columns, so it survives reloads identically to the live reply."""
-    from app.agents.routing import needs_risk_check, RISK_CHECK_SLUG
+    from app.agents.guards import needs_risk_check, RISK_CHECK_SLUG
     if needs_risk_check(row.get("emotion"), row.get("emotion_confidence"),
                         bool(row.get("escalated"))):
         return {"suggestedTest": RISK_CHECK_SLUG}

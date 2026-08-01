@@ -1,0 +1,57 @@
+# ===========================================================================
+# MindMate application configuration — NON-SECRET app behavior & tuning.
+#
+# Split of responsibilities:
+#   .env         secrets + machine-specific settings (Supabase keys, model
+#                paths, devices, AI_MODE). Never committed.
+#   config.yaml  application tuning that is safe to commit and identical on
+#                every machine: generation parameters, memory window, risk
+#                thresholds, crisis message.
+#
+# Everything here is read ONCE at boot through app/config.py (Config.*) —
+# nothing else in the codebase reads this file directly. Missing keys fall
+# back to the defaults hardcoded in config.py, so a partial file is fine.
+# ===========================================================================
+
+chatbot:
+  # Companion reply generation (fine-tuned Gemma 2 via LocalChatModel).
+  max_new_tokens: 90
+  temperature: 0.65
+  top_p: 0.9
+  repetition_penalty: 1.15
+  no_repeat_ngram_size: 6
+
+summarizer:
+  # Long-term-memory summaries (greedy decoding — deterministic).
+  max_new_tokens: 50
+
+memory:
+  # How many recent (user, bot) turns the chatbot sees VERBATIM.
+  # 0 = summary-only memory: the model never sees its own prior replies, so it
+  # can't imitate their length, and the rules stay next to the current message.
+  recent_turns: 0
+
+risk:
+  # Classifier label that counts as suicide risk.
+  class: Suicidal
+  # P(risk class) at/above this -> hard crisis escalation (fixed message,
+  # generation skipped).
+  escalation_threshold: 0.8
+  # 'Suicidal' label at/above this confidence (but below escalation) attaches
+  # a Suicide Risk Check quiz link to the reply.
+  quiz_threshold: 0.5
+
+# Fixed crisis-escalation message (helplines shown instead of a generated
+# reply). Keep the helplines in sync with the self-tests' crisis contacts.
+crisis_message: |
+  It sounds like you're carrying something incredibly heavy right now, and I'm
+  really glad you said it out loud. I'm not able to provide crisis support
+  myself, but people who can are available right now.
+
+  - If you're in immediate danger, please call your local emergency number.
+  - Malaysia: Befrienders KL 03-7627 2929 (24 hours)
+  - US: call or text 988 (Suicide & Crisis Lifeline)
+  - UK & ROI: Samaritans 116 123
+
+  You don't have to go through this alone — would you be willing to reach out
+  to one of these right now?

@@ -26,8 +26,13 @@
           onkeydown="if(event.key==='Enter') submitAuth()" />
       </label>
 
-      <!-- Register-only: the User Agreement (loaded from the database) -->
+      <!-- Register-only: phone number + the User Agreement (from the database) -->
       <div id="registerExtras" class="hidden">
+        <label class="field">
+          <span>Phone number</span>
+          <input id="phone" type="tel" autocomplete="tel"
+                 placeholder="+60 12-345 6789" />
+        </label>
         <div class="agreement-box">
           <div class="agreement-head">
             <span id="agreementTitle">User Agreement</span>

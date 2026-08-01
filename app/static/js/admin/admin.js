@@ -8,8 +8,8 @@
    The page is only a shell: all data comes from guarded endpoints.
    =========================================================================== */
 
-const VIEWS = ["overview", "emotions", "sessions", "testing", "staff",
-               "resources_edit", "dataset", "test_analysis", "prompts", "agreements"];
+const VIEWS = ["overview", "testchat", "emotions", "sessions", "staff",
+               "editing", "dataset", "test_analysis"];
 
 let currentView = "overview";
 const loadedViews = new Set();
@@ -56,6 +56,16 @@ function toggleEditor(listId, formId, open) {
   $(formId).classList.toggle("hidden", !open);
 }
 
+/* ---- Collapsible sidebar (like the user app's) ---- */
+function toggleAdminNav() {
+  const collapsed = document.querySelector(".admin-wrap").classList.toggle("nav-collapsed");
+  localStorage.setItem("adminNavCollapsed", collapsed ? "1" : "");
+}
+// Restore the saved state before first paint (script loads at end of body).
+if (localStorage.getItem("adminNavCollapsed") === "1") {
+  document.querySelector(".admin-wrap")?.classList.add("nav-collapsed");
+}
+
 /* ===================== VIEW SWITCHING ===================== */
 function switchView(name) {
   currentView = name;
@@ -71,18 +81,33 @@ function switchView(name) {
 // fetch once (loadedViews).
 function loadView(name) {
   if (name === "sessions") { loadSessions(); return; }
-  if (name === "resources_edit") { loadResourcesData(); return; }
+  if (name === "editing") { switchEditTab(currentEditTab); return; }
   if (name === "dataset") { switchDatasetTab("chatbot"); return; }
-  if (name === "test_analysis") { loadTestAnalytics(); }
-  if (name === "prompts") { loadPromptsData(); }
-  if (name === "agreements") { loadAgreementsData(); }
-  if (name === "testing") { loadTestingData(); }
+  // Self-Tests hosts BOTH the analytics and the assessments editor (the
+  // former separate "Testing" tab was merged into it).
+  if (name === "test_analysis") { loadTestAnalytics(); loadTestingData(); }
+  if (name === "testchat") { renderBenchModeChips(); renderBenchTurns(); loadBenchSessions(); return; }
+  if (name === "overview") { loadStats(); loadActivity(); return; }
 
   if (loadedViews.has(name)) return;
   loadedViews.add(name);
-  if (name === "overview") loadStats();
   if (name === "emotions") loadEmotions();
   if (name === "staff") loadStaff();
+}
+
+/* ---- Editing group: resources / prompts / agreements as sub-tabs ---- */
+const EDIT_TABS = ["resources_edit", "prompts", "agreements"];
+let currentEditTab = "resources_edit";
+
+function switchEditTab(name) {
+  currentEditTab = name;
+  for (const t of EDIT_TABS) {
+    $(`sub-view-${t}`).classList.toggle("hidden", t !== name);
+    $(`etab-${t}`).classList.toggle("active", t === name);
+  }
+  if (name === "resources_edit") loadResourcesData();
+  if (name === "prompts") loadPromptsData();
+  if (name === "agreements") loadAgreementsData();
 }
 
 /* ===================== OVERVIEW ===================== */
@@ -108,6 +133,287 @@ async function loadStats() {
             ${stats[key] ?? 0}</div>
         </div>`).join("")}
     </div>`;
+}
+
+/* ---- Dashboard graphs: chatbot usage + escalations per day (14 days).
+   Same-origin CSS bars only — the CSP forbids external chart libraries. ---- */
+async function loadActivity() {
+  const el = $("activityCharts");
+  const r = await api("/api/admin/activity");
+  if (r.error) { showErrorPlaceholder(el, r.error); return; }
+  const days = r.days || [];
+  if (!days.length) { showPlaceholder(el, "No chat activity yet."); return; }
+
+  const chart = (title, key, fillClass) => {
+    const max = Math.max(1, ...days.map((d) => d[key]));
+    return `
+      <div class="section-card">
+        <h3 class="accent">${escapeHTML(title)}</h3>
+        <div class="day-chart">
+          ${days.map((d) => `
+            <div class="day-col" title="${escapeHTML(d.date)}: ${d[key]}">
+              <div class="day-count">${d[key] || ""}</div>
+              <div class="day-bar-track">
+                <div class="day-bar ${fillClass}" style="height:${Math.round((d[key] / max) * 100)}%"></div>
+              </div>
+              <div class="day-label">${escapeHTML(d.date.slice(5))}</div>
+            </div>`).join("")}
+        </div>
+      </div>`;
+  };
+
+  el.innerHTML =
+    chart("Chatbot Usage — messages per day", "messages", "fill-blue") +
+    chart("Crisis Escalations per day", "escalations", "fill-red");
+}
+
+/* ===================== TEST CHAT (comparison bench) =====================
+   Comparison runs live in bench SESSIONS (rename/delete like user chats).
+   Each turn = one prompt answered by every variant; variants keep their own
+   conversation history across the session's turns. Ratings/feedback save per
+   variant to bench_result. "Normal - chat as a user" links to the test bench
+   page (real sessions + messages feedback). */
+const BENCH_HINTS = {
+  single_vs_multi: "Same Gemma 2 weights AND the same prompt rules (the " +
+    "'single' prompt = composed prompt without its summary/memory parts): " +
+    "the model alone VS the full multi-agent pipeline (diagnosis, tone, " +
+    "summary memory, guardrails).",
+  models3: "The same message answered by all three fine-tuned study models " +
+    "under an identical system prompt. First run lazy-loads Llama 3.2 and " +
+    "Qwen3 - it can take a minute.",
+};
+let currentBenchMode = "single_vs_multi";
+let benchSessions = [];
+let benchSessionID = null;      // null = blank comparison (created on first run)
+let benchTurns = [];            // rendered turns of the open session
+let benchRenamingID = null;
+
+function switchBenchMode(mode) {
+  // Picking a mode starts a BLANK comparison in that mode (an open session's
+  // mode is fixed - its runs must stay comparable).
+  currentBenchMode = mode;
+  benchSessionID = null;
+  benchTurns = [];
+  renderBenchModeChips();
+  renderBenchSessionList();
+  renderBenchTurns();
+}
+
+function renderBenchModeChips() {
+  for (const m of Object.keys(BENCH_HINTS)) {
+    $(`ttab-${m}`).classList.toggle("active", m === currentBenchMode);
+  }
+  $("benchModeHint").textContent = BENCH_HINTS[currentBenchMode];
+}
+
+function newBenchSession() {
+  benchSessionID = null;
+  benchTurns = [];
+  renderBenchSessionList();
+  renderBenchTurns();
+  setMsg($("benchMsg"), "");
+}
+
+async function loadBenchSessions() {
+  const el = $("benchSessionList");
+  const r = await api("/api/admin/bench/sessions");
+  if (r.error) { showApiError(el, r.error); return; }
+  if (!r.available) {
+    el.innerHTML = `<p class="placeholder">${escapeHTML(r.note || "Unavailable.")}</p>`;
+    return;
+  }
+  benchSessions = r.sessions || [];
+  renderBenchSessionList();
+}
+
+const BENCH_MODE_TAGS = { single_vs_multi: "single vs multi", models3: "3 models" };
+
+function renderBenchSessionList() {
+  const el = $("benchSessionList");
+  if (!benchSessions.length) {
+    el.innerHTML = `<p class="placeholder">No comparison chats yet.</p>`;
+    return;
+  }
+  el.innerHTML = benchSessions.map((bs) =>
+    bs.id === benchRenamingID ? `
+    <div class="session-item renaming" onclick="event.stopPropagation()">
+      <input id="benchRenameInput" class="rename-input" maxlength="80"
+        value="${escapeHTML(bs.title)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault(); saveBenchRename('${bs.id}');}
+                   else if(event.key==='Escape'){cancelBenchRename();}" />
+      <div class="s-actions">
+        <button onclick="event.stopPropagation(); saveBenchRename('${bs.id}')">Save</button>
+        <button onclick="event.stopPropagation(); cancelBenchRename()">Cancel</button>
+      </div>
+    </div>` : `
+    <div class="session-item ${bs.id === benchSessionID ? "active" : ""}"
+         onclick="openBenchSession('${bs.id}')">
+      <div class="s-title">${escapeHTML(bs.title)}</div>
+      <div class="s-date">${escapeHTML(fmtDate(bs.created_at))} -
+        <span class="s-supervised">${escapeHTML(BENCH_MODE_TAGS[bs.mode] || bs.mode)}</span></div>
+      <div class="s-actions">
+        <button onclick="event.stopPropagation(); startBenchRename('${bs.id}')">Rename</button>
+        <button onclick="event.stopPropagation(); deleteBenchSession('${bs.id}')">Delete</button>
+      </div>
+    </div>`).join("");
+  if (benchRenamingID) {
+    const input = $("benchRenameInput");
+    if (input) { input.focus(); input.select(); }
+  }
+}
+
+function startBenchRename(id) { benchRenamingID = id; renderBenchSessionList(); }
+function cancelBenchRename() { benchRenamingID = null; renderBenchSessionList(); }
+
+async function saveBenchRename(id) {
+  const input = $("benchRenameInput");
+  const title = input ? input.value.trim() : "";
+  if (!title) { cancelBenchRename(); return; }
+  const r = await api(`/api/admin/bench/sessions/${id}/rename`, {
+    method: "POST", body: JSON.stringify({ title }),
+  });
+  if (r.error) { setMsg($("benchMsg"), r.error, "error"); return; }
+  const bs = benchSessions.find((x) => x.id === id);
+  if (bs) bs.title = r.title;
+  benchRenamingID = null;
+  renderBenchSessionList();
+}
+
+async function deleteBenchSession(id) {
+  const bs = benchSessions.find((x) => x.id === id);
+  if (!confirm(`Delete "${bs ? bs.title : "this comparison"}" and all its runs?`)) return;
+  const r = await api(`/api/admin/bench/sessions/${id}`, { method: "DELETE" });
+  if (r.error) { setMsg($("benchMsg"), r.error, "error"); return; }
+  benchSessions = benchSessions.filter((x) => x.id !== id);
+  if (id === benchSessionID) newBenchSession();
+  else renderBenchSessionList();
+}
+
+async function openBenchSession(id) {
+  const r = await api(`/api/admin/bench/sessions/${id}`);
+  if (r.error) { setMsg($("benchMsg"), r.error, "error"); return; }
+  benchSessionID = id;
+  currentBenchMode = r.session.mode;
+  benchTurns = r.turns || [];
+  renderBenchModeChips();
+  renderBenchSessionList();
+  renderBenchTurns();
+  setMsg($("benchMsg"), "");
+}
+
+function renderBenchTurns() {
+  const el = $("benchTurns");
+  if (!benchTurns.length) {
+    el.innerHTML = `
+      <div class="welcome-msg">
+        <h2>${benchSessionID ? "No runs yet" : "New comparison"}</h2>
+        <p>Type a message below - every variant answers it, side by side.</p>
+      </div>`;
+    return;
+  }
+  el.innerHTML = benchTurns.map((turn, ti) => `
+    <div class="bench-turn">
+      <div class="msg msg-user"><div class="bubble">${escapeHTML(turn.prompt)}</div></div>
+      <div class="bench-grid">
+        ${turn.results.map((res, vi) => benchCardHTML(res, ti, vi)).join("")}
+      </div>
+    </div>`).join("");
+  el.scrollTop = el.scrollHeight;
+}
+
+function benchCardHTML(r, ti, vi) {
+  const body = r.error
+    ? `<p class="bench-error">! ${escapeHTML(r.error)}</p>`
+    : `<p class="bench-reply">${escapeHTML(r.reply || "")}</p>`;
+  const meta = r.latencyMs != null
+    ? `<span class="bench-latency">${(r.latencyMs / 1000).toFixed(1)}s</span>` : "";
+  const rated = r.rating || 0;
+  const controls = (r.benchID && !r.error) ? `
+      <div class="bench-stars" id="stars-t${ti}-v${vi}">
+        ${[1, 2, 3, 4, 5].map((n) => `
+          <button class="star-btn ${n <= rated ? "on" : ""}"
+            onclick="rateBench(${ti}, ${vi}, ${n})">${n <= rated ? "\u2605" : "\u2606"}</button>`).join("")}
+      </div>
+      <textarea id="bench-fb-t${ti}-v${vi}" class="dash-textarea" style="min-height:48px;"
+        placeholder="Feedback on this reply (optional)...">${escapeHTML(r.feedback || "")}</textarea>
+      <div class="flex-between">
+        <p id="bench-msg-t${ti}-v${vi}" class="auth-msg no-margin"></p>
+        <button class="btn btn-ghost small" onclick="saveBenchFeedback(${ti}, ${vi})">Save</button>
+      </div>` : "";
+  return `
+    <div class="bench-card">
+      <div class="bench-head">
+        <span class="bench-label">${escapeHTML(r.label || r.variant)}</span>${meta}
+      </div>
+      ${body}
+      ${controls}
+    </div>`;
+}
+
+function rateBench(ti, vi, n) {
+  benchTurns[ti].results[vi]._rating = n;
+  $(`stars-t${ti}-v${vi}`).querySelectorAll(".star-btn").forEach((b, idx) => {
+    b.textContent = idx < n ? "\u2605" : "\u2606";
+    b.classList.toggle("on", idx < n);
+  });
+}
+
+async function saveBenchFeedback(ti, vi) {
+  const r = benchTurns[ti].results[vi];
+  const rating = r._rating || r.rating || null;
+  const feedback = $(`bench-fb-t${ti}-v${vi}`).value.trim() || null;
+  const msgEl = $(`bench-msg-t${ti}-v${vi}`);
+  if (!rating && !feedback) { setMsg(msgEl, "Pick a rating or write feedback.", "error"); return; }
+  setMsg(msgEl, "Saving...");
+  const res = await api(`/api/admin/bench/${r.benchID}/feedback`, {
+    method: "POST", body: JSON.stringify({ rating, feedback }),
+  });
+  if (res.error) { setMsg(msgEl, res.error, "error"); return; }
+  r.rating = res.rating; r.feedback = res.feedback;
+  setMsg(msgEl, "Saved", "ok");
+}
+
+async function runBench() {
+  const message = $("benchMessage").value.trim();
+  if (!message) { setMsg($("benchMsg"), "Type a test message first.", "error"); return; }
+  const btn = $("benchRunBtn");
+  btn.disabled = true;
+  btn.textContent = currentBenchMode === "models3" ? "Running... (models may load)" : "Running...";
+  setMsg($("benchMsg"), "");
+
+  // Session created lazily on the first run - like the user chat. If the
+  // bench tables are missing, fall back to a sessionless one-shot run.
+  if (!benchSessionID) {
+    const cs = await api("/api/admin/bench/sessions", {
+      method: "POST", body: JSON.stringify({ mode: currentBenchMode }),
+    });
+    if (cs.sessionID) {
+      benchSessionID = cs.sessionID;
+      benchSessions.unshift({ id: cs.sessionID, title: cs.title,
+                              mode: cs.mode, created_at: cs.createdAt });
+      renderBenchSessionList();
+    } else if (cs.error) {
+      setMsg($("benchMsg"), cs.error, "error");
+    }
+  }
+
+  const r = await api("/api/admin/bench/run", {
+    method: "POST",
+    body: JSON.stringify({ mode: currentBenchMode, message,
+                           sessionID: benchSessionID }),
+  });
+  btn.disabled = false;
+  btn.textContent = "\u25B6 Run";
+  if (r.error) { setMsg($("benchMsg"), r.error, "error"); return; }
+
+  benchTurns.push({ runID: r.runID, prompt: message, results: r.results || [] });
+  renderBenchTurns();
+  $("benchMessage").value = "";
+  if (!r.persisted) setMsg($("benchMsg"), r.note || "Results not saved.", "error");
+  if (r.title) {   // first turn auto-named the comparison chat
+    const bs = benchSessions.find((x) => x.id === benchSessionID);
+    if (bs) { bs.title = r.title; renderBenchSessionList(); }
+  }
 }
 
 /* ===================== EMOTION ANALYSIS (all users) ===================== */
@@ -577,7 +883,7 @@ async function loadAgreementsData() {
   container.innerHTML = `<div class="dash-stack">` + r.data.map((ag) => `
     <div class="dash-card">
       <h4>Agreement ID: ${escapeHTML(ag.id)}</h4>
-      <textarea id="ag-content-${ag.id}" class="dash-textarea tall">${escapeHTML(ag.content)}</textarea>
+      <textarea id="ag-content-${ag.id}" class="dash-textarea agreement-edit">${escapeHTML(ag.content)}</textarea>
       <div class="flex-between">
         <p id="ag-msg-${ag.id}" class="auth-msg no-margin"></p>
         <button class="btn btn-primary" onclick="saveAgreement('${ag.id}')">💾 Save Agreement</button>
@@ -749,6 +1055,10 @@ async function loadTestAnalytics() {
         </div>
         <div class="data-label band-heading">Severity Distribution</div>
         ${bandsHtml}
+        <button class="btn btn-ghost small logs-toggle"
+                onclick="toggleAttemptLogs('${stats.test_id}', this)">
+          📋 Individual Logs</button>
+        <div id="logs-${stats.test_id}" class="attempt-logs hidden"></div>
       </div>`;
   }).join("");
 
@@ -761,6 +1071,61 @@ async function loadTestAnalytics() {
   $("analysis-risk-band").textContent = dominantBand;
 
   drawBandChart(globalBands);
+}
+
+/* ---------- Individual attempt logs (per analytics card) ----------
+   Click "Individual Logs" -> the card fetches that test's attempts and lists
+   who took it and when; expanding an attempt shows the exact answer the user
+   picked for EVERY question (labels resolved server-side). */
+async function toggleAttemptLogs(testId, btn) {
+  const panel = $(`logs-${testId}`);
+  const nowHidden = panel.classList.toggle("hidden");
+  btn.textContent = nowHidden ? "📋 Individual Logs" : "▾ Hide Individual Logs";
+  if (nowHidden || panel.dataset.loaded) return;
+
+  panel.innerHTML = `<p class="placeholder">Loading attempts...</p>`;
+  const r = await api(`/api/admin/analytics/tests/${testId}/attempts`);
+  if (r.error) { showApiError(panel, r.error); return; }
+  panel.dataset.loaded = "1";
+
+  const attempts = r.attempts || [];
+  if (!attempts.length) {
+    panel.innerHTML = `<p class="placeholder">No attempts recorded yet.</p>`;
+    return;
+  }
+  attemptsCache[testId] = attempts;
+  panel.innerHTML = attempts.map((a, i) => `
+    <div class="attempt-row">
+      <div class="attempt-head" onclick="toggleAttemptDetail('${testId}', ${i})">
+        <div>
+          <div class="attempt-user">${escapeHTML(a.email)}</div>
+          <div class="attempt-date">${escapeHTML(fmtDate(a.createdAt))}</div>
+        </div>
+        <div class="attempt-result">
+          <span class="attempt-band">${escapeHTML(a.band || "—")}</span>
+          <span class="attempt-score">${a.score ?? "—"}</span>
+          <span class="attempt-caret" id="caret-${testId}-${i}">▸</span>
+        </div>
+      </div>
+      <div id="attempt-detail-${testId}-${i}" class="attempt-detail hidden"></div>
+    </div>`).join("");
+}
+
+const attemptsCache = {}; // testId -> attempts (for detail expansion)
+
+function toggleAttemptDetail(testId, i) {
+  const detail = $(`attempt-detail-${testId}-${i}`);
+  const open = !detail.classList.toggle("hidden");
+  $(`caret-${testId}-${i}`).textContent = open ? "▾" : "▸";
+  if (!open || detail.dataset.loaded) return;
+  detail.dataset.loaded = "1";
+  const a = (attemptsCache[testId] || [])[i];
+  detail.innerHTML = (a.picks || []).map((p, qi) => `
+    <div class="pick-row">
+      <div class="pick-q">${qi + 1}. ${escapeHTML(p.question)}</div>
+      <div class="pick-a">${escapeHTML(p.answer)}${p.value != null
+        ? ` <span class="pick-val">(+${p.value})</span>` : ""}</div>
+    </div>`).join("") || `<p class="placeholder">No answers stored.</p>`;
 }
 
 // All-tests risk-band distribution, drawn with the shared bar rows

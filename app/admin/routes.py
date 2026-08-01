@@ -25,7 +25,10 @@ from app.chat.routes import user_or_ip
 from app.db.admin_repo import (
     get_stats, get_emotion_overview, list_all_sessions, get_session_review,
     list_staff_accounts, set_role, list_all_resources, update_resource, list_prompts, update_prompt, list_agreements, update_agreement,
-    create_prompt, delete_prompt, create_resource, delete_resource, list_tests, create_test, update_test, delete_test, get_test_analytics,
+    create_prompt, delete_prompt, create_resource, delete_resource, list_tests, create_test, update_test, delete_test, get_test_analytics, get_test_attempts, get_daily_activity,
+    BenchTableMissing, save_bench_results, set_bench_feedback, list_bench_results,
+    create_bench_session, list_bench_sessions, get_bench_session,
+    rename_bench_session, delete_bench_session, get_bench_turns, get_bench_histories,
     resolve_pending_message, list_experiment_sessions, rename_session_admin,
 )
 from app.db.repo import get_profile, set_message_feedback
@@ -440,7 +443,169 @@ def admin_test_delete(test_id):
     return _write_response(delete_test(test_id), "Failed to delete test.")
 
 
+@admin_api_bp.get("/activity")
+@staff_required
+def admin_activity_api():
+    """Dashboard graphs: messages + escalations per day (last 14 days)."""
+    return jsonify({"days": get_daily_activity()})
+
+
+# ---------------- JSON API: Test Chat comparison bench ----------------
+_BENCH_TABLE_HINT = ("Results were generated but NOT saved: the bench tables "
+                     "don't exist yet. Re-run schema.sql in the Supabase SQL "
+                     "editor (full reset) to enable saving + ratings.")
+
+
+@admin_api_bp.get("/bench/sessions")
+@staff_required
+def bench_sessions_list():
+    """This staff member's comparison chats (newest first)."""
+    try:
+        return jsonify({"available": True,
+                        "sessions": list_bench_sessions(g.user["id"])})
+    except BenchTableMissing:
+        return jsonify({"available": False, "sessions": [],
+                        "note": _BENCH_TABLE_HINT})
+
+
+@admin_api_bp.post("/bench/sessions")
+@staff_required
+def bench_session_create():
+    from app.agents.bench import BENCH_MODES
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode")
+    if mode not in BENCH_MODES:
+        return json_error("mode must be 'models3' or 'single_vs_multi'", 400)
+    try:
+        row = create_bench_session(g.user["id"], mode)
+    except BenchTableMissing:
+        return json_error(_BENCH_TABLE_HINT, 503)
+    return jsonify({"sessionID": row["id"], "mode": row["mode"],
+                    "title": row["title"], "createdAt": row["created_at"]}), 201
+
+
+@admin_api_bp.post("/bench/sessions/<session_id>/rename")
+@staff_required
+def bench_session_rename(session_id):
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title or len(title) > 80:
+        return json_error("title required (max 80 chars)", 400)
+    row = rename_bench_session(g.user["id"], session_id, title)
+    if not row:
+        return json_error("comparison chat not found", 404)
+    return jsonify({"ok": True, "title": row["title"]})
+
+
+@admin_api_bp.delete("/bench/sessions/<session_id>")
+@staff_required
+def bench_session_delete(session_id):
+    delete_bench_session(g.user["id"], session_id)
+    return jsonify({"ok": True})
+
+
+@admin_api_bp.get("/bench/sessions/<session_id>")
+@staff_required
+def bench_session_detail(session_id):
+    sess = get_bench_session(g.user["id"], session_id)
+    if not sess:
+        return json_error("comparison chat not found", 404)
+    return jsonify({"session": {"sessionID": sess["id"], "mode": sess["mode"],
+                                "title": sess["title"],
+                                "createdAt": sess["created_at"]},
+                    "turns": get_bench_turns(session_id)})
+
+
+@admin_api_bp.post("/bench/run")
+@staff_required
+@limiter.limit("10 per minute", key_func=user_or_ip)  # each run = LLM generations
+def bench_run():
+    """Run one comparison turn ('models3' or 'single_vs_multi'). With a
+    sessionID, each variant continues its own history from the session's
+    earlier turns, and the results become the session's next turn. The extra
+    models for 'models3' lazy-load on the first run (can take a minute)."""
+    from app.agents.bench import BENCH_MODES, run_bench
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode")
+    message = (data.get("message") or "").strip()
+    session_id = (data.get("sessionID") or "").strip() or None
+    if mode not in BENCH_MODES:
+        return json_error("mode must be 'models3' or 'single_vs_multi'", 400)
+    if not message or len(message) > 2000:
+        return json_error("message required (max 2000 chars)", 400)
+
+    histories = {}
+    if session_id:
+        sess = get_bench_session(g.user["id"], session_id)
+        if not sess:
+            return json_error("comparison chat not found", 404)
+        if sess["mode"] != mode:
+            return json_error("this comparison chat uses a different mode", 400)
+        histories = get_bench_histories(session_id)
+
+    results = run_bench(mode, message, histories)
+    run_id = str(uuid4())
+    persisted, note, title = True, None, None
+    try:
+        ids = save_bench_results(g.user["id"], run_id, mode, message, results,
+                                 session_id=session_id)
+        for r in results:
+            r["benchID"] = ids.get(r["variant"])
+        # First turn auto-names the comparison chat, like the user chat.
+        if session_id and sess["title"] == "New comparison":
+            renamed = rename_bench_session(g.user["id"], session_id, message[:40])
+            title = renamed and renamed["title"]
+    except BenchTableMissing:
+        persisted, note = False, _BENCH_TABLE_HINT
+    return jsonify({"runID": run_id, "mode": mode, "results": results,
+                    "sessionID": session_id, "title": title,
+                    "persisted": persisted, "note": note})
+
+
+@admin_api_bp.post("/bench/<bench_id>/feedback")
+@staff_required
+def bench_feedback(bench_id):
+    """Staff rating (1-5) and/or feedback text for one bench variant."""
+    data = request.get_json(silent=True) or {}
+    rating = data.get("rating")
+    feedback = (data.get("feedback") or "").strip() or None
+    if rating is None and feedback is None:
+        return json_error("provide a rating or feedback", 400)
+    if rating is not None and (not isinstance(rating, int) or not 1 <= rating <= 5):
+        return json_error("rating must be an integer from 1 to 5", 400)
+    try:
+        row = set_bench_feedback(bench_id, rating=rating, feedback=feedback)
+    except BenchTableMissing:
+        return json_error(_BENCH_TABLE_HINT, 503)
+    if not row:
+        return json_error("bench result not found", 404)
+    return jsonify({"ok": True, "rating": row.get("rating"),
+                    "feedback": row.get("feedback")})
+
+
+@admin_api_bp.get("/bench/history")
+@staff_required
+def bench_history():
+    """Recent bench rows for the Test Chat history panel."""
+    try:
+        return jsonify({"available": True, "results": list_bench_results()})
+    except BenchTableMissing:
+        return jsonify({"available": False, "results": [],
+                        "note": _BENCH_TABLE_HINT})
+
+
 @admin_api_bp.get("/analytics/tests")
 @staff_required
 def admin_test_analytics_api():
     return jsonify({"data": get_test_analytics()})
+
+
+@admin_api_bp.get("/analytics/tests/<test_id>/attempts")
+@staff_required
+def admin_test_attempts_api(test_id):
+    """Individual logs for one test: every attempt with the answer picked for
+    each question (resolved to option labels server-side)."""
+    data = get_test_attempts(test_id)
+    if data is None:
+        return json_error("test not found", 404)
+    return jsonify(data)

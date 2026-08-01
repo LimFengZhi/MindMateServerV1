@@ -1,17 +1,65 @@
 /* Staff admin site. Layers on style.css (topbar, buttons, cards, chips…). */
-.admin-wrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+/* Layout: topbar across the top, then a VERTICAL nav sidebar + content. */
+.admin-wrap {
+  height: 100vh; height: 100dvh; overflow: hidden;
+  display: grid; grid-template-rows: auto 1fr; grid-template-columns: 225px 1fr;
+}
+.admin-wrap > .topbar { grid-column: 1 / -1; }
 .admin-topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .admin-body { max-width: 980px; margin: 0 auto; }
 .admin-body h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: -.3px; }
 .admin-body h2 + .muted { margin: -6px 0 16px; display: block; }
 .admin-body .auth-msg { text-align: left; }
 
-/* view navigation (reuses .chip from style.css) */
+/* Vertical view navigation (reuses .chip from style.css, restyled as
+   sidebar links; the Editing view's sub-tabs keep the pill look). */
 .admin-nav {
-  display: flex; gap: 8px; flex-wrap: wrap; flex: 0 0 auto;
-  padding: 12px 24px 0;
+  grid-row: 2; grid-column: 1;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 14px 12px; overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface) 0%, transparent 100%);
+}
+.admin-nav .chip {
+  border-radius: 10px; text-align: left; width: 100%;
+  padding: 10px 13px; font-size: 13.5px;
 }
 .admin-nav .chip:disabled { opacity: .45; cursor: not-allowed; }
+.admin-wrap > .content { grid-row: 2; grid-column: 2; }
+
+/* Collapsed sidebar (☰ in the topbar, persisted in localStorage). */
+.admin-wrap.nav-collapsed { grid-template-columns: 0 1fr; }
+.admin-wrap.nav-collapsed .admin-nav { display: none; }
+
+/* Pages that use .admin-wrap WITHOUT the vertical nav (test bench, live
+   counselling): their layout spans the whole grid row, or the 225px nav
+   column would squeeze the entire page. */
+.admin-wrap > .test-layout { grid-row: 2; grid-column: 1 / -1; min-height: 0; }
+
+@media (max-width: 900px) {
+  /* Small screens: sidebar becomes a wrapping horizontal bar again. */
+  .admin-wrap { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
+  .admin-nav {
+    grid-row: 2; grid-column: 1; flex-direction: row; flex-wrap: wrap;
+    border-right: 0; border-bottom: 1px solid var(--border); padding: 10px 16px;
+  }
+  .admin-nav .chip { width: auto; border-radius: 999px; }
+  .admin-wrap > .content { grid-row: 3; grid-column: 1; }
+}
+
+/* Dashboard activity graphs (per-day CSS column bars — no chart library). */
+.activity-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 20px; }
+.day-chart {
+  display: flex; align-items: flex-end; gap: 6px;
+  height: 150px; padding-top: 8px;
+}
+.day-col { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; min-width: 0; }
+.day-count { font-size: 11px; color: var(--muted); height: 14px; }
+.day-bar-track { flex: 1 1 auto; width: 100%; max-width: 34px; display: flex; align-items: flex-end; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.day-bar { width: 100%; border-radius: 6px 6px 0 0; transition: height .3s ease; }
+.day-bar.fill-blue { background: var(--accent-grad); }
+.day-bar.fill-red { background: linear-gradient(180deg, #ff8a8a, #ff5252); }
+.day-label { font-size: 10px; color: var(--faint); white-space: nowrap; }
 
 /* sessions list + review */
 .sess-row {
@@ -63,6 +111,85 @@
 .danger-text { color: var(--danger); }
 .dash-textarea.code-area { min-height: 200px; margin-bottom: 12px; font-family: monospace; font-size: 13px; }
 .dash-textarea.tall { min-height: 200px; margin-bottom: 12px; }
+/* Agreement editor: the full legal text must be comfortably readable. */
+.dash-textarea.agreement-edit {
+  min-height: 480px; margin-bottom: 12px;
+  font-size: 14px; line-height: 1.65; resize: vertical;
+}
+
+/* Test Chat comparison bench. */
+.bench-layout { display: flex; gap: 16px; align-items: flex-start; }
+.bench-side { flex: 0 0 230px; display: flex; flex-direction: column; gap: 10px; }
+.bench-side .side-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--faint); margin-top: 6px;
+}
+.bench-main { flex: 1 1 auto; min-width: 0; }
+.bench-turns { display: flex; flex-direction: column; gap: 18px; margin: 14px 0; }
+.bench-turn .msg-user { margin-bottom: 10px; }
+.bench-composer { display: flex; gap: 10px; align-items: flex-end; margin-top: 8px; }
+.bench-composer textarea { flex: 1 1 auto; margin-bottom: 0; }
+@media (max-width: 900px) {
+  .bench-layout { flex-direction: column; }
+  .bench-side { flex: 1 1 auto; width: 100%; }
+}
+.bench-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px; margin-top: 4px;
+}
+.bench-card {
+  border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px;
+  background: var(--surface); display: flex; flex-direction: column; gap: 10px;
+}
+.bench-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.bench-label { font-size: 13px; font-weight: 700; color: var(--blue-bright); }
+.bench-latency { font-size: 11.5px; color: var(--faint); }
+.bench-reply { margin: 0; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
+.bench-error { margin: 0; font-size: 13px; color: var(--danger); }
+.bench-stars { display: flex; gap: 4px; }
+.star-btn {
+  background: transparent; border: 0; cursor: pointer; padding: 0;
+  font-size: 20px; color: var(--faint); transition: color .12s, transform .12s;
+}
+.star-btn:hover { transform: scale(1.15); }
+.star-btn.on { color: #ffd166; }
+.bench-hist-row {
+  display: flex; justify-content: space-between; gap: 14px;
+  padding: 10px 0; border-bottom: 1px dashed var(--border);
+}
+.bench-hist-row:last-child { border-bottom: 0; }
+.bench-hist-main { min-width: 0; }
+.bench-hist-prompt { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.bench-hist-reply { font-size: 12.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bench-hist-side { flex: 0 0 auto; text-align: right; }
+.bench-hist-rating { color: #ffd166; font-size: 13px; letter-spacing: 1px; }
+.bench-hist-fb { font-size: 11.5px; color: var(--muted); max-width: 180px; margin-top: 3px; }
+.small-text { font-size: 11.5px; margin-left: 8px; }
+
+/* Individual attempt logs inside the Test Analysis cards. */
+.logs-toggle { margin-top: 14px; }
+.attempt-logs { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.attempt-row { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.attempt-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 9px 12px; cursor: pointer; transition: background .14s;
+}
+.attempt-head:hover { background: var(--surface-2); }
+.attempt-user { font-size: 13px; font-weight: 600; }
+.attempt-date { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.attempt-result { display: flex; align-items: center; gap: 10px; }
+.attempt-band {
+  font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
+  background: rgba(79,140,255,.14); border: 1px solid rgba(79,140,255,.35);
+}
+.attempt-score { font-size: 14px; font-weight: 700; color: var(--blue-bright); }
+.attempt-caret { color: var(--muted); font-size: 12px; }
+.attempt-detail { padding: 4px 12px 12px; border-top: 1px solid var(--border); }
+.pick-row { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.pick-row:last-child { border-bottom: 0; }
+.pick-q { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.pick-a { font-size: 13px; font-weight: 600; margin-top: 3px; }
+.pick-val { color: var(--faint); font-weight: 400; font-size: 12px; }
 
 /* dataset browser */
 .pager {

@@ -9,6 +9,8 @@
 {% block body %}
   <div class="admin-wrap">
     <header class="topbar">
+      <button class="btn btn-icon" id="navToggle" onclick="toggleAdminNav()"
+              title="Hide / show the menu">☰</button>
       <img class="brand-logo small" src="{{ url_for('assets', filename='images/logo.png') }}" alt="" />
       <strong class="topbar-title">MindMate — Staff</strong>
       <div class="admin-topbar-right">
@@ -19,30 +21,67 @@
     </header>
 
     <nav class="admin-nav">
-      <button class="chip active" id="nav-overview" onclick="switchView('overview')">📊 Overview</button>
+      <button class="chip active" id="nav-overview" onclick="switchView('overview')">📊 Dashboard</button>
+      <button class="chip" id="nav-testchat" onclick="switchView('testchat')">🧪 Test Chat</button>
       <button class="chip" onclick="location.href='/admin/live'">🟢 Live Counselling</button>
-      <button class="chip" id="nav-emotions" onclick="switchView('emotions')">💭 Emotion Analysis</button>
       <button class="chip" id="nav-sessions" onclick="switchView('sessions')">💬 User Sessions</button>
-      <button class="chip" id="nav-testing" onclick="switchView('testing')">🧪 Testing</button>
-      <button class="chip hidden" id="nav-staff" onclick="switchView('staff')">👥 Staff</button>
-      <button class="chip" id="nav-resources_edit" onclick="switchView('resources_edit')">📝 Resources Editing</button>
+      <button class="chip" id="nav-emotions" onclick="switchView('emotions')">💭 Emotion Analysis</button>
+      <button class="chip" id="nav-test_analysis" onclick="switchView('test_analysis')">📈 Self-Tests</button>
+      <button class="chip" id="nav-editing" onclick="switchView('editing')">📝 Editing</button>
       <button class="chip" id="nav-dataset" onclick="switchView('dataset')">🗂 Dataset Management</button>
-      <button class="chip" id="nav-test_analysis" onclick="switchView('test_analysis')">📈 Test Analysis</button>
-      <button class="chip" id="nav-prompts" onclick="switchView('prompts')">🤖 System Prompts</button>
-      <button class="chip" id="nav-agreements" onclick="switchView('agreements')">📜 Agreements</button>
+      <button class="chip hidden" id="nav-staff" onclick="switchView('staff')">👥 Staff</button>
     </nav>
 
     <main class="content scroll">
       <div class="admin-body">
 
         <section id="view-overview">
-          <h2>Overview</h2>
+          <h2>Dashboard</h2>
           <div id="adminStats"><p class="placeholder">Loading…</p></div>
+          <div id="activityCharts" class="activity-grid">
+            <p class="placeholder">Loading activity…</p>
+          </div>
         </section>
 
         <section id="view-emotions" class="hidden">
           <h2>Emotion Analysis — all users</h2>
           <div id="emotionBody"><p class="placeholder">Loading…</p></div>
+        </section>
+
+        <section id="view-testchat" class="hidden">
+          <h2>Test Chat</h2>
+          <p class="muted">Three ways to test the chatbot. Comparison runs live
+            in chats (rename/delete like the user app) and every reply can be
+            rated (1–5) with feedback.</p>
+
+          <div class="chip-row">
+            <button class="chip" onclick="location.href='/admin/testing/multi-agent'">
+              🧍 Normal — chat as a user</button>
+            <button class="chip active" id="ttab-single_vs_multi"
+                    onclick="switchBenchMode('single_vs_multi')">⚖️ Single vs Multi-agent</button>
+            <button class="chip" id="ttab-models3"
+                    onclick="switchBenchMode('models3')">🎛 Three Models</button>
+          </div>
+
+          <div class="bench-layout">
+            <aside class="bench-side">
+              <button class="btn btn-primary btn-block" onclick="newBenchSession()">＋ New comparison</button>
+              <div class="side-label">Comparison chats</div>
+              <div id="benchSessionList"><p class="placeholder">Loading…</p></div>
+            </aside>
+
+            <div class="bench-main section-card">
+              <p class="muted" id="benchModeHint" style="margin-top:0;"></p>
+              <div id="benchTurns" class="bench-turns"></div>
+              <div class="bench-composer">
+                <textarea id="benchMessage" class="dash-textarea" style="min-height:60px;"
+                  placeholder="Type the test message a user might send…"
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); runBench();}"></textarea>
+                <button class="btn btn-primary" id="benchRunBtn" onclick="runBench()">▶ Run</button>
+              </div>
+              <p id="benchMsg" class="auth-msg no-margin"></p>
+            </div>
+          </div>
         </section>
 
         <section id="view-sessions" class="hidden">
@@ -53,67 +92,6 @@
           <div id="sessionsBody"><p class="placeholder">Loading…</p></div>
         </section>
 
-        <section id="view-testing" class="hidden">
-          <h2>Mental Health Testing</h2>
-          <p class="muted">Manage Tests.</p>
-
-          <div class="section-card">
-
-            <div id="test-list-container">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-                <p class="muted" style="margin:0;">Select a test to edit, or add a new one.</p>
-                <div style="display: flex; gap: 10px;">
-                  <button class="btn btn-ghost small" onclick="loadTestingData()">🔄 Refresh</button>
-                  <button class="btn btn-primary small" onclick="openNewTestEditor()">+ Add Assessment</button>
-                </div>
-              </div>
-              <div id="testListGrid" class="sess-list">
-                <p class="placeholder">Loading assessments...</p>
-              </div>
-            </div>
-
-            <div id="test-form-container" class="hidden">
-              <div style="display: flex; gap: 10px; margin-bottom: 20px; align-items: center;">
-                <button class="btn btn-ghost" onclick="closeTestEditor()">← Back to List</button>
-                <h3 id="editor-test-title" style="margin:0;">Edit Assessment</h3>
-              </div>
-
-              <form id="testForm" onsubmit="saveTestChanges(event)" class="form-grid">
-                <input type="hidden" id="edit-test-id" />
-
-                <div style="display: flex; flex-direction: column; gap: 18px; width: 100%;">
-
-                  <div style="width: 100%;">
-                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Assessment Title</label>
-                    <input type="text" id="edit-test-title" class="dash-input" style="width: 100%; box-sizing: border-box;" placeholder="e.g., PHQ-9 Depression Screener" required />
-                  </div>
-
-                  <div style="width: 100%;">
-                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Description / Instructions</label>
-                    <textarea id="edit-test-description" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 70px;" placeholder="Instructions shown to the user before starting..."></textarea>
-                  </div>
-
-                  <div style="width: 100%;">
-                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Questions (JSON Array)</label>
-                    <textarea id="edit-test-questions" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 180px; font-family: monospace;" placeholder='[{"q": "Feeling down, depressed, or hopeless?", "options": ["Not at all", "Several days", "More than half the days", "Nearly every day"]}]'></textarea>
-                  </div>
-
-                </div>
-
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 14px;">
-                  <p id="testFormMsg" class="auth-msg" style="margin: 0;"></p>
-
-                  <div style="display: flex; gap: 12px; align-items: center;">
-                    <button type="button" id="btn-delete-test" class="btn btn-ghost" style="color: #ff6b6b;" onclick="deleteCurrentTest()">🗑️ Delete</button>
-                    <button type="button" class="btn btn-ghost" onclick="closeTestEditor()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">💾 Save Assessment</button>
-                  </div>
-                </div>
-              </form>
-            </div>
-
-          </div>
-        </section>
 
         <section id="view-staff" class="hidden">
           <h2>Staff accounts</h2>
@@ -133,7 +111,20 @@
           </section>
         </section>
 
-        <section id="view-resources_edit" class="hidden">
+
+        <section id="view-editing" class="hidden">
+          <h2>Editing</h2>
+          <p class="muted">Everything content-related in one place: resources,
+            system prompts, and the user agreement.</p>
+          <div class="chip-row edit-subtabs">
+            <button class="chip active" id="etab-resources_edit"
+                    onclick="switchEditTab('resources_edit')">📝 Resources</button>
+            <button class="chip" id="etab-prompts"
+                    onclick="switchEditTab('prompts')">🤖 Prompts</button>
+            <button class="chip" id="etab-agreements"
+                    onclick="switchEditTab('agreements')">📜 Agreements</button>
+          </div>
+        <div id="sub-view-resources_edit">
           <h2>Resources Dataset Editing</h2>
           <p class="muted">Add, modify, or archive self-help guides, exercises, and media resources.</p>
 
@@ -224,7 +215,47 @@
 
             </div>
           </div>
+        </div>
+        <div id="sub-view-prompts" class="hidden">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 14px;">
+            <div>
+              <h2>System Prompts Editor</h2>
+              <p class="muted" style="margin: 0;">Modify or create core pipeline instructions.</p>
+            </div>
+            <button class="btn btn-primary" onclick="toggleNewPromptForm()">+ Add Prompt</button>
+          </div>
+
+          <div id="new-prompt-container" class="section-card hidden" style="margin-bottom: 20px; border-color: var(--blue);">
+            <h3 style="color: var(--blue); margin-top: 0;">Create New Prompt</h3>
+
+            <label class="stat-label" style="display:block; margin-bottom: 6px;">Prompt Name Identifier</label>
+            <input type="text" id="new-prompt-name" class="dash-input" style="margin-bottom: 14px;" placeholder="e.g., triage_agent" />
+
+            <label class="stat-label" style="display:block; margin-bottom: 6px;">Instruction Content</label>
+            <textarea id="new-prompt-content" class="dash-textarea" style="min-height: 120px; margin-bottom: 14px;" placeholder="You are an AI assistant that..."></textarea>
+
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <p id="new-prompt-msg" class="auth-msg" style="margin: 0;"></p>
+              <div style="display: flex; gap: 10px;">
+                <button class="btn btn-ghost" onclick="toggleNewPromptForm()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitNewPrompt()">💾 Save New Prompt</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div id="promptsList"><p class="placeholder">Loading prompts...</p></div>
+          </div>
+        </div>
+        <div id="sub-view-agreements" class="hidden">
+          <h2>User Agreements & Consent</h2>
+          <p class="muted">Manage the Terms of Service and Consent text that users must accept on first login.</p>
+          <div class="section-card">
+            <div id="agreementsList"><p class="placeholder">Loading agreements...</p></div>
+          </div>
+        </div>
         </section>
+
         <section id="view-dataset" class="hidden">
           <h2>System Datasets</h2>
           <p class="muted">View training datasets below.</p>
@@ -274,47 +305,70 @@
           <div id="test-analytics-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
             <p class="placeholder">Loading analytics...</p>
           </div>
-        </section>
 
-        <section id="view-prompts" class="hidden">
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 14px;">
-            <div>
-              <h2>System Prompts Editor</h2>
-              <p class="muted" style="margin: 0;">Modify or create core pipeline instructions.</p>
-            </div>
-            <button class="btn btn-primary" onclick="toggleNewPromptForm()">+ Add Prompt</button>
-          </div>
+          <!-- Assessments editor (the former separate "Testing" tab, merged here) -->
+          <h3 style="margin: 24px 0 12px; color: var(--text);">Manage Assessments</h3>
+          <div class="section-card">
 
-          <div id="new-prompt-container" class="section-card hidden" style="margin-bottom: 20px; border-color: var(--blue);">
-            <h3 style="color: var(--blue); margin-top: 0;">Create New Prompt</h3>
-
-            <label class="stat-label" style="display:block; margin-bottom: 6px;">Prompt Name Identifier</label>
-            <input type="text" id="new-prompt-name" class="dash-input" style="margin-bottom: 14px;" placeholder="e.g., triage_agent" />
-
-            <label class="stat-label" style="display:block; margin-bottom: 6px;">Instruction Content</label>
-            <textarea id="new-prompt-content" class="dash-textarea" style="min-height: 120px; margin-bottom: 14px;" placeholder="You are an AI assistant that..."></textarea>
-
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <p id="new-prompt-msg" class="auth-msg" style="margin: 0;"></p>
-              <div style="display: flex; gap: 10px;">
-                <button class="btn btn-ghost" onclick="toggleNewPromptForm()">Cancel</button>
-                <button class="btn btn-primary" onclick="submitNewPrompt()">💾 Save New Prompt</button>
+            <div id="test-list-container">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                <p class="muted" style="margin:0;">Select a test to edit, or add a new one.</p>
+                <div style="display: flex; gap: 10px;">
+                  <button class="btn btn-ghost small" onclick="loadTestingData()">🔄 Refresh</button>
+                  <button class="btn btn-primary small" onclick="openNewTestEditor()">+ Add Assessment</button>
+                </div>
+              </div>
+              <div id="testListGrid" class="sess-list">
+                <p class="placeholder">Loading assessments...</p>
               </div>
             </div>
-          </div>
 
-          <div class="section-card">
-            <div id="promptsList"><p class="placeholder">Loading prompts...</p></div>
+            <div id="test-form-container" class="hidden">
+              <div style="display: flex; gap: 10px; margin-bottom: 20px; align-items: center;">
+                <button class="btn btn-ghost" onclick="closeTestEditor()">← Back to List</button>
+                <h3 id="editor-test-title" style="margin:0;">Edit Assessment</h3>
+              </div>
+
+              <form id="testForm" onsubmit="saveTestChanges(event)" class="form-grid">
+                <input type="hidden" id="edit-test-id" />
+
+                <div style="display: flex; flex-direction: column; gap: 18px; width: 100%;">
+
+                  <div style="width: 100%;">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Assessment Title</label>
+                    <input type="text" id="edit-test-title" class="dash-input" style="width: 100%; box-sizing: border-box;" placeholder="e.g., PHQ-9 Depression Screener" required />
+                  </div>
+
+                  <div style="width: 100%;">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Description / Instructions</label>
+                    <textarea id="edit-test-description" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 70px;" placeholder="Instructions shown to the user before starting..."></textarea>
+                  </div>
+
+                  <div style="width: 100%;">
+                    <label class="stat-label" style="display:block; margin-bottom: 6px;">Questions (JSON Array)</label>
+                    <textarea id="edit-test-questions" class="dash-textarea" style="width: 100%; box-sizing: border-box; min-height: 180px; font-family: monospace;" placeholder='[{"q": "Feeling down, depressed, or hopeless?", "options": ["Not at all", "Several days", "More than half the days", "Nearly every day"]}]'></textarea>
+                  </div>
+
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 14px;">
+                  <p id="testFormMsg" class="auth-msg" style="margin: 0;"></p>
+
+                  <div style="display: flex; gap: 12px; align-items: center;">
+                    <button type="button" id="btn-delete-test" class="btn btn-ghost" style="color: #ff6b6b;" onclick="deleteCurrentTest()">🗑️ Delete</button>
+                    <button type="button" class="btn btn-ghost" onclick="closeTestEditor()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💾 Save Assessment</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
           </div>
         </section>
 
-        <section id="view-agreements" class="hidden">
-          <h2>User Agreements & Consent</h2>
-          <p class="muted">Manage the Terms of Service and Consent text that users must accept on first login.</p>
-          <div class="section-card">
-            <div id="agreementsList"><p class="placeholder">Loading agreements...</p></div>
-          </div>
-        </section>
+
+
+
 
 
       </div>
