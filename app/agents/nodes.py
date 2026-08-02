@@ -117,9 +117,8 @@ def persist(state):
         "confidence": diag["confidence"],
         "escalated": state["escalated"],
     }
-    # Elevated suicide risk (crisis turns, or a confident 'Suicidal' label
-    # below the escalation threshold): point the user at the in-app Suicide
-    # Risk Check quiz. The frontend renders this as a link on the reply.
-    if needs_risk_check(diag["emotion"], diag["confidence"], state["escalated"]):
+    # Crisis turns point the user at the in-app Suicide Risk Check quiz.
+    # The frontend renders this as a link on the reply.
+    if needs_risk_check(state["escalated"]):
         payload["suggestedTest"] = RISK_CHECK_SLUG
     return {"payload": payload}

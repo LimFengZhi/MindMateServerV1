@@ -222,9 +222,8 @@ show a waiting indicator and poll §11b):
 ```
 `escalated:true` means a crisis response was returned instead of a normal reply.
 
-**Elevated suicide risk:** when the turn escalated, or the classifier labelled
-it `Suicidal` with confidence ≥ `RISK_QUIZ_THRESHOLD` (default 0.5), the payload
-additionally carries:
+**Elevated suicide risk:** when the turn escalated, the payload additionally
+carries:
 ```json
 { "suggestedTest": "suicide-risk-check" }
 ```

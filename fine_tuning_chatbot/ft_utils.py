@@ -10,6 +10,7 @@ Training is REPLY-ONLY: prompts carry no system instruction, and TRL computes
 loss on the completion column only.
 """
 import random
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -33,8 +34,9 @@ _SPLITS = ("train", "val", "test")
 # ---------------------------------------------------------------------------
 # Load & clean
 # ---------------------------------------------------------------------------
-def load_raw(dataset_key):
-    """Raw JSONL dump -> cleaned DataFrame with 'input'/'output' columns."""
+def load_raw(dataset_key, apply_filters=True):
+    """Raw JSONL dump -> cleaned DataFrame with 'input'/'output' columns.
+    apply_filters=False skips the quality filters (EDA inspects them itself)."""
     dcfg = CFG["datasets"][dataset_key]
     schema = dcfg["schema"]
     df = pd.read_json(RAW_DIR / dcfg["raw_filename"], lines=True)
@@ -51,7 +53,38 @@ def load_raw(dataset_key):
     for col in ("input", "output"):
         df[col] = df[col].fillna("").astype(str).str.strip()
     df = df[df["input"].ne("") & df["output"].ne("")]
-    return df.drop_duplicates(subset=["input", "output"]).reset_index(drop=True)
+    df = df.drop_duplicates(subset=["input", "output"]).reset_index(drop=True)
+    return _quality_filter(df) if apply_filters else df
+
+
+_PLACEHOLDER_RE = re.compile(r"\[[A-Za-z][A-Za-z '/]{0,24}\]")
+
+
+def quality_filter_masks(df):
+    """Per-rule boolean masks (True = row is DROPPED) from the `preprocess`
+    block in config.yaml. Shared by the actual filter and the EDA notebook."""
+    pcfg = CFG.get("preprocess", {})
+    masks = {}
+    if pcfg.get("drop_placeholder_replies"):
+        masks["placeholder_reply"] = df["output"].str.contains(_PLACEHOLDER_RE)
+    if pcfg.get("drop_letter_replies"):
+        masks["letter_reply"] = df["output"].str.match(r"\s*Dear\b")
+    max_words = pcfg.get("max_total_words")
+    if max_words:
+        total = df["input"].str.split().str.len() + df["output"].str.split().str.len()
+        masks[f"too_long_over_{max_words}_words"] = total > max_words
+    return masks
+
+
+def _quality_filter(df):
+    masks = quality_filter_masks(df)
+    if not masks:
+        return df
+    drop = pd.concat(masks, axis=1).any(axis=1)
+    if drop.any():
+        print(f"[preprocess] quality filters dropped {drop.sum()} rows "
+              f"({drop.sum() / len(df) * 100:.1f}%) -> {(~drop).sum()} kept")
+    return df[~drop].reset_index(drop=True)
 
 
 def add_provenance(df, dataset_key="mentalchat16k"):

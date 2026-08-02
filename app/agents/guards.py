@@ -7,8 +7,6 @@ model features.
 """
 import re
 
-from app.config import Config
-
 # ---------------------------------------------------------------------------
 # Crisis detection (safety layer 1 — lexical net)
 # ---------------------------------------------------------------------------
@@ -41,17 +39,12 @@ def crisis_keywords_present(text):
 RISK_CHECK_SLUG = "suicide-risk-check"
 
 
-def needs_risk_check(emotion, confidence, escalated):
+def needs_risk_check(escalated):
     """True when a turn should carry a link to the Suicide Risk Check quiz:
-    every escalated (crisis) turn, and any turn the classifier labels
-    'Suicidal' with at least RISK_QUIZ_THRESHOLD confidence — i.e. elevated
-    risk that may sit below the hard escalation threshold. Used for the live
-    reply payload AND when rebuilding transcripts, so the link survives a
-    reload (both read the same persisted emotion/confidence/escalated)."""
-    if escalated:
-        return True
-    return (emotion == Config.RISK_CLASS
-            and (confidence or 0) >= Config.RISK_QUIZ_THRESHOLD)
+    every escalated (crisis) turn. Used for the live reply payload AND when
+    rebuilding transcripts, so the link survives a reload (both read the same
+    persisted escalated flag)."""
+    return bool(escalated)
 
 
 # ---------------------------------------------------------------------------

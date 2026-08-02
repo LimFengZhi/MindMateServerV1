@@ -132,10 +132,6 @@ class Config:
     # --- Diagnostic / routing (emotion classifier) ---
     RISK_CLASS = _yaml("risk", "class", "Suicidal")
     RISK_THRESHOLD = float(_yaml("risk", "escalation_threshold", 0.8))
-    # Softer threshold: a 'Suicidal' label at/above this confidence (but below
-    # RISK_THRESHOLD) doesn't escalate, yet the reply carries a link to the
-    # in-app Suicide Risk Check self-test.
-    RISK_QUIZ_THRESHOLD = float(_yaml("risk", "quiz_threshold", 0.5))
 
     # Crisis escalation message (the crisis_reply node).
     CRISIS_MESSAGE = (_YAML.get("crisis_message") or (

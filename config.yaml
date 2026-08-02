@@ -35,11 +35,9 @@ risk:
   # Classifier label that counts as suicide risk.
   class: Suicidal
   # P(risk class) at/above this -> hard crisis escalation (fixed message,
-  # generation skipped).
+  # generation skipped). Escalated turns also carry the Suicide Risk Check
+  # quiz link on the reply.
   escalation_threshold: 0.8
-  # 'Suicidal' label at/above this confidence (but below escalation) attaches
-  # a Suicide Risk Check quiz link to the reply.
-  quiz_threshold: 0.5
 
 # Fixed crisis-escalation message (helplines shown instead of a generated
 # reply). Keep the helplines in sync with the self-tests' crisis contacts.
