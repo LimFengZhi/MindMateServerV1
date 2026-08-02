@@ -62,6 +62,14 @@ FLASK_HOST=127.0.0.1      # 0.0.0.0 to expose on your LAN
 > control (it's git-ignored). For anything beyond local dev, set a fixed
 > `SECRET_KEY`, add `SUPABASE_ANON_KEY`, and serve behind gunicorn/waitress.
 
+**Optional — crisis email.** Set `crisis_email.enabled: true` in `config.yaml`
+and fill in the SMTP values in `.env`, and every crisis escalation emails the
+counselling information to the user's registered address (at most one email
+per user per hour; wording + cooldown in the same `crisis_email` block). For
+Gmail use `smtp.gmail.com:587` with an **App Password** (Google Account →
+Security → 2-Step Verification → App passwords) — the normal account password
+won't work. Left disabled, nothing is sent and nothing else changes.
+
 ### d. Install dependencies
 ```bash
 # CPU PyTorch (only needed when AI_MODE=real)
@@ -144,12 +152,19 @@ Every user gets the `user` role automatically (via the `profiles` table).
     it (the edit is delivered; the bot's draft is recorded as rejected). The counsellor can also
     rename the session as a case label. Meanwhile the user's chat shows "being
     reviewed by a counsellor…" and polls until delivery.
-  - **Overview** — usage stats (users, sessions, messages, escalations, pending
-    reviews, tests taken)
+  - **Dashboard** — usage stats (users, sessions, messages, escalations, pending
+    reviews, tests taken) + 14-day usage/escalation charts
+  - **Suicide Alert** — crisis escalations for **today / this week / this
+    month**: totals, the affected users ranked highest-first (with phone), and
+    whether each completed the **Suicide Risk Check** quiz in that window
   - **Emotion Analysis** — emotion distribution + escalations across all users
-  - **User Sessions** — pick a user → pick a chat → review the transcript with
-    per-reply diagnostics; **rate each bot reply (1–5 ★), leave feedback**, and
-    **export the session as JSON**
+  - **User Sessions** — every registered user with their info (email, phone,
+    joined date, chat counts); open a user → pick a chat → review the
+    transcript with per-reply diagnostics; **rate each bot reply (1–5 ★),
+    leave feedback**, **export the session as JSON**, or click **📄 Report** to
+    generate a **session-analysis report** of the user's recent chats (written
+    by the summarizer model with the admin-editable `session_analysis` prompt),
+    view it, and **download it as PDF**
   - **Test Chat** — three testing types, all ratable (1–5 + feedback):
     *Normal (chat as a user)* — the multi-agent test bench
     (`/admin/testing/multi-agent`) chatting through the real pipeline on the

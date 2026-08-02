@@ -39,6 +39,23 @@ risk:
   # quiz link on the reply.
   escalation_threshold: 0.8
 
+# Crisis email: the counselling-info email sent to the user when a turn
+# escalates. `enabled` is the on/off switch; the SMTP credentials are secrets
+# and stay in .env (SMTP_HOST etc.). The body reuses crisis_message below.
+crisis_email:
+  enabled: false
+  subject: "MindMate — someone is available to talk"
+  intro: >-
+    You reached out about something heavy today. Here is the counselling
+    information again, so it's easy to find when you need it.
+  cooldown_minutes: 60   # at most one email per user per hour
+
+# Staff session-analysis report (User Sessions tab): generated on demand by
+# the SAME summarizer model, guided by the 'session_analysis' DB prompt.
+report:
+  max_new_tokens: 350    # the report needs more room than the 50-token summary
+  recent_sessions: 3     # how many recent sessions the analysis covers
+
 # Fixed crisis-escalation message (helplines shown instead of a generated
 # reply). Keep the helplines in sync with the self-tests' crisis contacts.
 crisis_message: |

@@ -18,6 +18,8 @@ PROMPT_FILES = {
     # The composed prompt minus its summary/memory parts — the fair-comparison
     # baseline for the Test Chat bench's single-agent variant.
     "single": "single_prompt.txt",
+    # Staff session-analysis report (User Sessions tab), run by the summarizer.
+    "session_analysis": "session_analysis.txt",
 }
 
 _CACHE_TTL = 15  # seconds
@@ -73,3 +75,8 @@ def build_single_system():
     but with no summary memory (and no per-turn substitutions) — so a
     single-vs-multi comparison isolates the architecture, not the prompt."""
     return _resolve("single")
+
+
+def build_session_analysis_system():
+    """Instructions for the staff session-analysis report (summarizer model)."""
+    return _resolve("session_analysis")

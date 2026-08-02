@@ -79,6 +79,7 @@ def _seed_prompts(sb):
         "composed": "Chatbot system prompt. Placeholders: {diagnostic_label}, {summarised_history}.",
         "summarise": "Summarize-agent instruction prompt.",
         "single": "Test Chat bench: single-agent baseline (composed rules WITHOUT the summary/memory parts).",
+        "session_analysis": "Staff session-analysis report instructions (User Sessions tab, run by the summarizer model).",
     }
     existing = sb.table("prompts").select("key").execute()
     have = {r["key"] for r in (existing.data or [])}

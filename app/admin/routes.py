@@ -30,6 +30,7 @@ from app.db.admin_repo import (
     create_bench_session, list_bench_sessions, get_bench_session,
     rename_bench_session, delete_bench_session, get_bench_turns, get_bench_histories,
     resolve_pending_message, list_experiment_sessions, rename_session_admin,
+    get_suicide_alerts, ALERT_PERIOD_DAYS, list_users_overview,
 )
 from app.db.repo import get_profile, set_message_feedback
 from app.extensions import limiter
@@ -448,6 +449,65 @@ def admin_test_delete(test_id):
 def admin_activity_api():
     """Dashboard graphs: messages + escalations per day (last 14 days)."""
     return jsonify({"days": get_daily_activity()})
+
+
+# ---------------- JSON API: Suicide Alerts ----------------
+@admin_api_bp.get("/alerts/suicide")
+@staff_required
+def suicide_alerts_api():
+    """Escalations per period (?period=today|week|month) with the affected
+    users ranked by count and their Suicide Risk Check uptake in that window."""
+    period = request.args.get("period", "today")
+    if period not in ALERT_PERIOD_DAYS:
+        return json_error("period must be today, week, or month", 400)
+    return jsonify(get_suicide_alerts(period))
+
+
+# ---------------- JSON API: user overview + session-analysis report ----------
+# Reports are generated ONLY when staff click Generate (one summarizer-model
+# call), then kept in this in-memory cache so the PDF download doesn't have to
+# regenerate. Single-process, like live_claims; restart clears it.
+_report_cache = {}  # user_id -> report dict
+
+
+@admin_api_bp.get("/users")
+@staff_required
+def users_overview_api():
+    """All registered users with profile info + chat aggregates (the User
+    Sessions tab's level-1 list — includes users with no sessions yet)."""
+    return jsonify({"users": list_users_overview()})
+
+
+@admin_api_bp.post("/users/<user_id>/report")
+@staff_required
+@limiter.limit("6 per minute", key_func=user_or_ip)  # each run = one LLM call
+def generate_user_report(user_id):
+    """Generate the session-analysis report for one user's recent sessions
+    (summarizer model + the 'session_analysis' DB prompt)."""
+    from app.agents.report import build_session_report
+    report = build_session_report(user_id)
+    if report is None:
+        return json_error("user not found", 404)
+    _report_cache[user_id] = report
+    return jsonify({"report": report})
+
+
+@admin_api_bp.get("/users/<user_id>/report.pdf")
+@staff_required
+def download_user_report(user_id):
+    """The last generated report for this user as a PDF attachment."""
+    report = _report_cache.get(user_id)
+    if not report:
+        return json_error("no report generated yet — click Generate first", 404)
+    from app.admin.pdf_report import render_report_pdf
+    email = (report["user"].get("email") or "user").split("@")[0]
+    date = (report.get("generatedAt") or "")[:10]
+    return Response(
+        render_report_pdf(report),
+        mimetype="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="mindmate_report_{email}_{date}.pdf"'},
+    )
 
 
 # ---------------- JSON API: Test Chat comparison bench ----------------

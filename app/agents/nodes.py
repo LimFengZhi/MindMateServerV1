@@ -102,6 +102,13 @@ def persist(state):
         escalated=state["escalated"], summary=state.get("summary"),
     )
 
+    # Crisis escalation: email the counselling info to the user (fire-and-
+    # forget, .env-toggled, cooldown inside). Sent in experiment mode too —
+    # the crisis is real even while the reply waits for counsellor review.
+    if state["escalated"]:
+        from app.email_utils import notify_crisis
+        notify_crisis(state["user_id"])
+
     if state["mode"] == "experiment":
         row = add_message(state["user_id"], state["session_id"],
                           state["message"], None,

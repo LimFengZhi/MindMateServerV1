@@ -630,3 +630,161 @@ def get_test_attempts(test_id, limit=200):
         })
     return {"testID": test_id, "title": test_res.data[0].get("title"),
             "attempts": attempts}
+
+
+# ---------------------------------------------------------------------------
+# Suicide alerts (staff): escalations + Suicide Risk Check uptake per period
+# ---------------------------------------------------------------------------
+ALERT_PERIOD_DAYS = {"today": 1, "week": 7, "month": 30}
+_RISK_TEST_SLUG = "suicide-risk-check"
+
+
+def _profiles_by_user():
+    rows = (_retry_once(lambda: get_sb().table("profiles")
+                        .select("id, email, phone, role, created_at")
+                        .execute())).data or []
+    return {p["id"]: p for p in rows}
+
+
+def get_suicide_alerts(period="today"):
+    """Escalation overview for the Suicide Alert tab: every user who had a
+    crisis escalation in the period (today / last 7 days / last 30 days),
+    ordered by how many, with whether they completed the Suicide Risk Check
+    quiz in that same window (and their latest score/band if so)."""
+    from datetime import timedelta
+    days = ALERT_PERIOD_DAYS.get(period, 1)
+    now = datetime.now(timezone.utc)
+    since = (now.replace(hour=0, minute=0, second=0, microsecond=0)
+             if period == "today" else now - timedelta(days=days))
+    since_iso = since.isoformat()
+
+    esc = (_retry_once(lambda: get_sb().table("messages")
+                       .select("user_id, created_at")
+                       .eq("escalated", True)
+                       .gte("created_at", since_iso)
+                       .execute())).data or []
+    per_user = {}
+    for m in esc:
+        u = per_user.setdefault(m["user_id"], {"count": 0, "last": None})
+        u["count"] += 1
+        if not u["last"] or (m.get("created_at") or "") > u["last"]:
+            u["last"] = m.get("created_at")
+
+    # Suicide Risk Check attempts inside the same window, latest per user.
+    quiz = {}
+    test_res = (_retry_once(lambda: get_sb().table("test")
+                            .select("id").eq("slug", _RISK_TEST_SLUG)
+                            .limit(1).execute())).data or []
+    if test_res:
+        attempts = (_retry_once(lambda: get_sb().table("test_created")
+                                .select("user_id, score, band, created_at")
+                                .eq("test_id", test_res[0]["id"])
+                                .gte("created_at", since_iso)
+                                .order("created_at", desc=True)
+                                .execute())).data or []
+        for a in attempts:
+            quiz.setdefault(a["user_id"], a)  # newest first -> keep the latest
+
+    profiles = _profiles_by_user()
+    users = []
+    for uid, agg in per_user.items():
+        p = profiles.get(uid) or {}
+        q = quiz.get(uid)
+        users.append({
+            "userID": uid,
+            "email": p.get("email") or "unknown",
+            "phone": p.get("phone"),
+            "escalations": agg["count"],
+            "lastEscalation": agg["last"],
+            "quizDone": q is not None,
+            "quizScore": (q or {}).get("score"),
+            "quizBand": (q or {}).get("band"),
+            "quizAt": (q or {}).get("created_at"),
+        })
+    users.sort(key=lambda u: u["escalations"], reverse=True)
+    return {
+        "period": period if period in ALERT_PERIOD_DAYS else "today",
+        "since": since_iso,
+        "totalEscalations": len(esc),
+        "usersAffected": len(users),
+        "quizCompleted": sum(1 for u in users if u["quizDone"]),
+        "users": users,
+    }
+
+
+# ---------------------------------------------------------------------------
+# User overview (staff): all users + their info, for the User Sessions tab
+# ---------------------------------------------------------------------------
+def list_users_overview():
+    """Every registered user with profile info and aggregate chat counts —
+    includes users with no sessions yet (unlike list_all_sessions)."""
+    profiles = _profiles_by_user()
+    sess = (_retry_once(lambda: get_sb().table("sessions")
+                        .select("id, user_id").execute())).data or []
+    msgs = (_retry_once(lambda: get_sb().table("messages")
+                        .select("user_id, escalated").execute())).data or []
+    sess_counts, msg_counts, esc_counts = {}, {}, {}
+    for s in sess:
+        sess_counts[s["user_id"]] = sess_counts.get(s["user_id"], 0) + 1
+    for m in msgs:
+        msg_counts[m["user_id"]] = msg_counts.get(m["user_id"], 0) + 1
+        if m.get("escalated"):
+            esc_counts[m["user_id"]] = esc_counts.get(m["user_id"], 0) + 1
+    users = [{
+        "userID": uid,
+        "email": p.get("email") or "unknown",
+        "phone": p.get("phone"),
+        "role": p.get("role") or "user",
+        "joinedAt": p.get("created_at"),
+        "sessions": sess_counts.get(uid, 0),
+        "messages": msg_counts.get(uid, 0),
+        "escalations": esc_counts.get(uid, 0),
+    } for uid, p in profiles.items()]
+    users.sort(key=lambda u: u.get("joinedAt") or "", reverse=True)
+    return users
+
+
+def get_user_report_data(user_id, recent_sessions=3):
+    """Everything the session-analysis report needs: the user's profile and
+    their N most recent sessions WITH full transcripts (oldest-first turns).
+    Returns None for an unknown user."""
+    try:
+        prof = (_retry_once(lambda: get_sb().table("profiles")
+                            .select("id, email, phone, role, created_at")
+                            .eq("id", user_id).limit(1).execute())).data or []
+    except APIError as e:
+        return _none_if_bad_uuid(e)
+    if not prof:
+        return None
+
+    sessions = (_retry_once(lambda: get_sb().table("sessions")
+                            .select("id, title, mode, created_at")
+                            .eq("user_id", user_id)
+                            .order("created_at", desc=True)
+                            .limit(recent_sessions)
+                            .execute())).data or []
+    out_sessions = []
+    for s in sessions:
+        msgs = (_retry_once(lambda: get_sb().table("messages")
+                            .select("question, reply, emotion, escalated, created_at")
+                            .eq("session_id", s["id"])
+                            .order("created_at", desc=False)
+                            .execute())).data or []
+        out_sessions.append({
+            "sessionID": s["id"],
+            "title": s.get("title") or "New chat",
+            "mode": s.get("mode") or "multi",
+            "createdAt": s.get("created_at"),
+            "messages": msgs,
+        })
+    p = prof[0]
+    return {
+        "user": {
+            "userID": p["id"],
+            "email": p.get("email") or "unknown",
+            "phone": p.get("phone"),
+            "role": p.get("role") or "user",
+            "joinedAt": p.get("created_at"),
+        },
+        "sessions": out_sessions,
+    }

@@ -22,6 +22,9 @@ supabase>=2.0              # Supabase Python client (Postgres + GoTrue auth)
 requests>=2.31
 beautifulsoup4>=4.12
 
+# --- Staff session-analysis report PDF (app/admin/pdf_report.py) ---
+fpdf2>=2.7
+
 # --- Agent orchestration (the chat pipeline is a LangGraph state machine) ---
 langgraph>=1.0
 langchain-core>=1.0

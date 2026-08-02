@@ -8,8 +8,8 @@
    The page is only a shell: all data comes from guarded endpoints.
    =========================================================================== */
 
-const VIEWS = ["overview", "testchat", "emotions", "sessions", "staff",
-               "editing", "dataset", "test_analysis"];
+const VIEWS = ["overview", "alerts", "testchat", "emotions", "sessions",
+               "staff", "editing", "dataset", "test_analysis"];
 
 let currentView = "overview";
 const loadedViews = new Set();
@@ -88,6 +88,7 @@ function loadView(name) {
   if (name === "test_analysis") { loadTestAnalytics(); loadTestingData(); }
   if (name === "testchat") { renderBenchModeChips(); renderBenchTurns(); loadBenchSessions(); return; }
   if (name === "overview") { loadStats(); loadActivity(); return; }
+  if (name === "alerts") { loadAlerts(); return; }
 
   if (loadedViews.has(name)) return;
   loadedViews.add(name);
@@ -445,44 +446,167 @@ async function loadEmotions() {
     </div>`;
 }
 
-/* ===================== USER SESSIONS (user -> chat -> review) ============= */
+/* ===================== SUICIDE ALERT ===================== */
+let currentAlertPeriod = "today";
+
+function switchAlertPeriod(period) {
+  currentAlertPeriod = period;
+  for (const p of ["today", "week", "month"]) {
+    $(`ptab-${p}`).classList.toggle("active", p === period);
+  }
+  loadAlerts();
+}
+
+async function loadAlerts() {
+  const el = $("alertsBody");
+  showPlaceholder(el, "Loading…");
+  const r = await api(`/api/admin/alerts/suicide?period=${currentAlertPeriod}`);
+  if (r.error) { showErrorPlaceholder(el, r.error); return; }
+
+  const cards = `
+    <div class="cards">
+      <div class="stat-card">
+        <div class="stat-label">Crisis escalations</div>
+        <div class="stat-value ${r.totalEscalations ? "danger" : ""}">${r.totalEscalations}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Users affected</div>
+        <div class="stat-value">${r.usersAffected}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Did the Suicide Risk Check</div>
+        <div class="stat-value">${r.quizCompleted}/${r.usersAffected}</div>
+      </div>
+    </div>`;
+
+  const rows = (r.users || []).map((u) => {
+    const quiz = u.quizDone
+      ? `<span class="reviewed">✓ done — ${escapeHTML(u.quizBand || "?")}
+          (${u.quizScore ?? "?"})</span>`
+      : '<span class="not-reviewed">✗ not taken</span>';
+    return `
+      <div class="sess-row">
+        <div class="sess-main">
+          <div class="sess-title">👤 ${escapeHTML(u.email)}</div>
+          <div class="sess-sub">${u.phone ? "📞 " + escapeHTML(u.phone) + " · " : ""}
+            last escalation ${escapeHTML(fmtDate(u.lastEscalation))}
+            · quiz: ${quiz}</div>
+        </div>
+        <span class="sess-badge ${u.escalations ? "" : "done"}">
+          ${u.escalations} escalation${u.escalations === 1 ? "" : "s"}</span>
+      </div>`;
+  }).join("") || placeholderHTML("No crisis escalations in this period. 🎉");
+
+  el.innerHTML = cards + `
+    <div class="section-card">
+      <h3 class="accent">Users with escalations — highest first</h3>
+      ${rows}
+    </div>`;
+}
+
+/* ===================== USER SESSIONS (user info -> chat -> review) ======== */
+let usersOverview = [];   // /api/admin/users — all users with info
+
 async function loadSessions() {
-  const r = await api("/api/admin/sessions");
+  const [r, u] = await Promise.all([
+    api("/api/admin/sessions"), api("/api/admin/users"),
+  ]);
   if (r.error) { showErrorPlaceholder($("sessionsBody"), r.error); return; }
   sessionsCache = r.sessions || [];
+  usersOverview = u.error ? [] : (u.users || []);
   renderUsersList();
 }
 
-// Level 1: one row per user, aggregated from their sessions.
+// Level 1: one row per registered user, with their profile info, chats
+// drill-down, and the session-analysis report generator.
 function renderUsersList() {
   selectedUserEmail = null;
-  if (!sessionsCache.length) {
-    showPlaceholder($("sessionsBody"), "No sessions yet.");
+  if (!usersOverview.length) {
+    showPlaceholder($("sessionsBody"), "No registered users yet.");
     return;
   }
-  const users = [];
-  for (const s of sessionsCache) {
-    let u = users.find((x) => x.email === s.email);
-    if (!u) { u = { email: s.email, sessions: 0, messages: 0, reviewed: 0 }; users.push(u); }
-    u.sessions += 1;
-    u.messages += s.messageCount;
-    u.reviewed += s.reviewedCount;
-  }
-  $("sessionsBody").innerHTML = users.map((u, i) => `
-    <div class="sess-row" onclick="openUser(${i})">
-      <div class="sess-main">
-        <div class="sess-title">👤 ${escapeHTML(u.email)}</div>
-        <div class="sess-sub">${u.sessions} chats · ${u.messages} messages
-          · ${u.reviewed} replies reviewed</div>
+  $("sessionsBody").innerHTML = usersOverview.map((u, i) => `
+    <div class="sess-row">
+      <div class="sess-main" onclick="openUser(${i})">
+        <div class="sess-title">👤 ${escapeHTML(u.email)}
+          ${u.role !== "user" ? `<span class="tag">${escapeHTML(u.role)}</span>` : ""}</div>
+        <div class="sess-sub">${u.phone ? "📞 " + escapeHTML(u.phone) + " · " : ""}
+          joined ${escapeHTML(fmtDate(u.joinedAt))}
+          · ${u.sessions} chats · ${u.messages} messages
+          ${u.escalations ? `· <span class="tag escalated">${u.escalations} escalations</span>` : ""}</div>
       </div>
-      <span class="sess-chev">›</span>
+      <button class="btn small" onclick="generateUserReport(${i}); event.stopPropagation();">
+        📄 Report</button>
+      <span class="sess-chev" onclick="openUser(${i})">›</span>
     </div>`).join("");
-  window._usersCache = users;
 }
 
 function openUser(index) {
-  const u = (window._usersCache || [])[index];
+  const u = usersOverview[index];
   if (u) renderUserSessions(u.email);
+}
+
+/* ---- Session-analysis report (generated ONLY on click; summarizer model +
+   the 'session_analysis' DB prompt; PDF downloads the cached result) ---- */
+async function generateUserReport(index) {
+  const u = usersOverview[index];
+  if (!u) return;
+  showPlaceholder($("sessionsBody"),
+    `Generating the session analysis for ${u.email}… (the summarizer model is writing)`);
+  const r = await api(`/api/admin/users/${u.userID}/report`, { method: "POST" });
+  if (r.error) { showErrorPlaceholder($("sessionsBody"), r.error); return; }
+  renderUserReport(r.report);
+}
+
+function renderUserReport(rep) {
+  const sessions = (rep.sessions || []).map((s) => {
+    const emotions = Object.entries(s.emotions || {})
+      .map(([k, v]) => `${escapeHTML(k)} ×${v}`).join(", ");
+    return `
+      <div class="sess-row">
+        <div class="sess-main">
+          <div class="sess-title">${escapeHTML(s.title)}</div>
+          <div class="sess-sub">${escapeHTML(fmtDate(s.createdAt))}
+            · ${s.messageCount} messages
+            ${s.escalations ? `· <span class="tag escalated">${s.escalations} escalations</span>` : ""}
+            ${emotions ? "· " + emotions : ""}</div>
+        </div>
+      </div>`;
+  }).join("") || placeholderHTML("This user has no chat sessions yet.");
+
+  $("sessionsBody").innerHTML = `
+    <div class="back-link" onclick="renderUsersList()">← All users</div>
+    <div class="review-head">
+      <div>
+        <div class="sess-title">📄 Session analysis — ${escapeHTML(rep.user.email)}</div>
+        <div class="sess-sub">${rep.sessionCount} recent session(s)
+          · generated ${escapeHTML(fmtDate(rep.generatedAt))}</div>
+      </div>
+      <button class="btn btn-primary" onclick="downloadUserReport('${rep.user.userID}')">
+        ⬇ Download PDF</button>
+    </div>
+    <div class="section-card">
+      <h3 class="accent">Analysis</h3>
+      <p style="white-space: pre-wrap; margin: 0;">${escapeHTML(rep.analysis || "")}</p>
+    </div>
+    <div class="section-card">
+      <h3 class="accent">Sessions covered</h3>
+      ${sessions}
+    </div>`;
+}
+
+// The PDF needs the auth header, so fetch -> blob (same as exportSession).
+async function downloadUserReport(userID) {
+  const res = await fetch(`/api/admin/users/${userID}/report.pdf`, {
+    headers: { Authorization: "Bearer " + getToken() },
+  });
+  if (!res.ok) { alert(`Download failed (${res.status})`); return; }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `mindmate_report_${userID}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // Level 2: that user's chats, with review progress on each.

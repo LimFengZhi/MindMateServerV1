@@ -22,6 +22,7 @@
 
     <nav class="admin-nav">
       <button class="chip active" id="nav-overview" onclick="switchView('overview')">📊 Dashboard</button>
+      <button class="chip" id="nav-alerts" onclick="switchView('alerts')">🚨 Suicide Alert</button>
       <button class="chip" id="nav-testchat" onclick="switchView('testchat')">🧪 Test Chat</button>
       <button class="chip" onclick="location.href='/admin/live'">🟢 Live Counselling</button>
       <button class="chip" id="nav-sessions" onclick="switchView('sessions')">💬 User Sessions</button>
@@ -46,6 +47,19 @@
         <section id="view-emotions" class="hidden">
           <h2>Emotion Analysis — all users</h2>
           <div id="emotionBody"><p class="placeholder">Loading…</p></div>
+        </section>
+
+        <section id="view-alerts" class="hidden">
+          <h2>Suicide Alert</h2>
+          <p class="muted">Crisis escalations in the chosen period, the users
+            they came from (highest first), and whether each user completed the
+            Suicide Risk Check quiz in that time.</p>
+          <div class="chip-row">
+            <button class="chip active" id="ptab-today" onclick="switchAlertPeriod('today')">Today</button>
+            <button class="chip" id="ptab-week" onclick="switchAlertPeriod('week')">This week</button>
+            <button class="chip" id="ptab-month" onclick="switchAlertPeriod('month')">This month</button>
+          </div>
+          <div id="alertsBody"><p class="placeholder">Loading…</p></div>
         </section>
 
         <section id="view-testchat" class="hidden">
@@ -86,9 +100,10 @@
 
         <section id="view-sessions" class="hidden">
           <h2>User Sessions</h2>
-          <p class="muted">Pick a user, then one of their chats, to review it — rate
-            replies, leave feedback, or export it as JSON. Already-reviewed replies
-            are shown with their rating and feedback.</p>
+          <p class="muted">Every registered user with their info. Open a user to
+            review their chats (rate replies, leave feedback, export JSON), or
+            generate a session-analysis report of their recent chats —
+            viewable here and downloadable as PDF.</p>
           <div id="sessionsBody"><p class="placeholder">Loading…</p></div>
         </section>
 

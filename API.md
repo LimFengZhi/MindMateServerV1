@@ -442,9 +442,20 @@ Future<Map<String, dynamic>> sendVoice(String sessionId, List<int> audioBytes) a
   `/api/admin/*`, staff-guarded): `stats`, `emotions`, `sessions`,
   `sessions/{id}`, `sessions/{id}/export` (JSON download),
   `messages/{id}/feedback` (staff rating 1–5 + feedback on a bot reply),
-  `live-sessions` + `sessions/{id}/rename` + `review/{messageID}`
-  (experiment-mode live counselling: connect to a user's chat, approve/edit
-  pending drafts — an edit records the draft as rejected), and the admin-only
-  `staff` account management. **Admins create staff accounts by
-  email** on the dashboard. Only the first admin is made via SQL:
-  `update public.profiles set role = 'admin' where email = '…';`
+  `alerts/suicide?period=today|week|month` (escalation counts + affected users
+  ranked highest-first, each with whether they completed the Suicide Risk Check
+  quiz in that window), `users` (all registered users with profile info +
+  chat aggregates), `users/{id}/report` (POST — generates the session-analysis
+  report over the user's recent chats with the summarizer model; rate-limited
+  6/min) + `users/{id}/report.pdf` (GET — downloads the last generated report;
+  404 until a report was generated), `live-sessions` + `sessions/{id}/rename`
+  + `review/{messageID}` (experiment-mode live counselling: connect to a
+  user's chat, approve/edit pending drafts — an edit records the draft as
+  rejected), and the admin-only `staff` account management. **Admins create
+  staff accounts by email** on the dashboard. Only the first admin is made via
+  SQL: `update public.profiles set role = 'admin' where email = '…';`
+- **Crisis email:** when a turn escalates, the server can email the counselling
+  information to the user's registered address (toggle `crisis_email.enabled`
+  in `config.yaml`; SMTP credentials in `.env`). At most one
+  email per user per cooldown window (default 60 min). No API surface — it is
+  a server-side side effect of §12's `escalated:true`.

@@ -109,6 +109,15 @@ class Config:
     WHISPER_DEVICE = _env("WHISPER_DEVICE", "cpu")
     WHISPER_COMPUTE = _env("WHISPER_COMPUTE", "int8")
 
+    # --- Crisis email (counselling info sent to the user on escalation) ---
+    # SMTP credentials are machine secrets (.env); the on/off toggle, subject,
+    # intro line, and cooldown are app tuning (config.yaml crisis_email block).
+    SMTP_HOST = _env("SMTP_HOST")
+    SMTP_PORT = int(_env("SMTP_PORT", "587") or 587)
+    SMTP_USER = _env("SMTP_USER")
+    SMTP_PASSWORD = _env("SMTP_PASSWORD")
+    MAIL_FROM = _env("MAIL_FROM") or _env("SMTP_USER")
+
     # ------------------------------------------------------------------
     # App tuning from config.yaml (defaults here keep the app bootable
     # without the file). Edit config.yaml, not these fallbacks.
@@ -132,6 +141,20 @@ class Config:
     # --- Diagnostic / routing (emotion classifier) ---
     RISK_CLASS = _yaml("risk", "class", "Suicidal")
     RISK_THRESHOLD = float(_yaml("risk", "escalation_threshold", 0.8))
+
+    # --- Crisis email toggle + wording + cooldown (SMTP secrets are above) ---
+    CRISIS_EMAIL_ENABLED = bool(_yaml("crisis_email", "enabled", False))
+    CRISIS_EMAIL_SUBJECT = _yaml("crisis_email", "subject",
+                                 "MindMate — someone is available to talk")
+    CRISIS_EMAIL_INTRO = _yaml("crisis_email", "intro",
+                               "You reached out about something heavy today. "
+                               "Here is the counselling information again, so "
+                               "it's easy to find when you need it.")
+    CRISIS_EMAIL_COOLDOWN_MIN = int(_yaml("crisis_email", "cooldown_minutes", 60))
+
+    # --- Session-analysis report (staff dashboard, summarizer model) ---
+    REPORT_MAX_NEW_TOKENS = int(_yaml("report", "max_new_tokens", 350))
+    REPORT_RECENT_SESSIONS = int(_yaml("report", "recent_sessions", 3))
 
     # Crisis escalation message (the crisis_reply node).
     CRISIS_MESSAGE = (_YAML.get("crisis_message") or (
