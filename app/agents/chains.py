@@ -30,12 +30,25 @@ from app.agents.prompt_loader import build_composed_system, build_summarise_syst
 # ---------------------------------------------------------------------------
 # The local models as LangChain chat models
 # ---------------------------------------------------------------------------
+# Family-specific chat-template details for the MAIN chatbot — selected by
+# CHAT_MODEL_FAMILY in .env (keep it in sync with CHAT_MODEL_PATH):
+#   fold_system     True for templates without a system role (Gemma 2)
+#   system_prefix   "/no_think" keeps Qwen3 in the non-thinking mode the
+#                   fine-tune was trained with (control token, not a prompt)
+CHAT_FAMILIES = {
+    "gemma2": dict(fold_system=True, stop=("<end_of_turn>",), system_prefix=""),
+    "qwen3": dict(fold_system=False, stop=("<|im_end|>",),
+                  system_prefix="/no_think\n"),
+    "llama32": dict(fold_system=False, stop=("<|eot_id|>",), system_prefix=""),
+}
+CHAT_FAMILY = CHAT_FAMILIES[Config.CHAT_MODEL_FAMILY]
+
 # Generation parameters live in config.yaml (Config.CHATBOT_*), not here.
 chatbot = LocalChatModel(
     model_name="chatbot",
     tok_attr="chatbot_tok", model_attr="chatbot_llm", ready_attr="chatbot_ready",
-    fold_system=True,                     # Gemma 2's template has no system role
-    extra_stop_tokens=("<end_of_turn>",),
+    fold_system=CHAT_FAMILY["fold_system"],
+    extra_stop_tokens=CHAT_FAMILY["stop"],
     max_new_tokens=Config.CHATBOT_MAX_NEW_TOKENS,
     gen_kwargs=Config.CHATBOT_GEN_KWARGS,
 )
@@ -70,9 +83,11 @@ class TidyReplyParser(BaseOutputParser[str]):
 
 _reply_generation = (
     # The system prompt text comes from the DB template (admin-editable) and
-    # enters the prompt as a value, composed with this turn's tone + summary.
+    # enters the prompt as a value, composed with this turn's tone + summary
+    # (plus the family's control prefix, e.g. Qwen3's /no_think).
     RunnablePassthrough.assign(
-        system_text=lambda x: build_composed_system(x["emotion"], x["summary"]),
+        system_text=lambda x: CHAT_FAMILY["system_prefix"]
+        + build_composed_system(x["emotion"], x["summary"]),
         history_msgs=lambda x: pairs_to_messages(x.get("history") or []),
     )
     | REPLY_PROMPT

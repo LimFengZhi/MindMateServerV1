@@ -503,22 +503,6 @@ def set_bench_feedback(bench_id, rating=None, feedback=None):
     return res.data[0] if res.data else None
 
 
-def list_bench_results(limit=40):
-    """Recent bench rows, newest first (the Test Chat history panel)."""
-    try:
-        res = (_retry_once(lambda: get_sb().table("bench_result")
-                           .select("id, run_id, mode, prompt, variant, label, "
-                                   "reply, error, latency_ms, rating, feedback, "
-                                   "created_at")
-                           .order("created_at", desc=True)
-                           .limit(limit)
-                           .execute()))
-    except APIError as e:
-        _raise_if_bench_missing(e)
-        raise
-    return res.data or []
-
-
 # ---------------------------------------------------------------------------
 # Dashboard activity (staff)
 # ---------------------------------------------------------------------------

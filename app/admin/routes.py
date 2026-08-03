@@ -26,7 +26,7 @@ from app.db.admin_repo import (
     get_stats, get_emotion_overview, list_all_sessions, get_session_review,
     list_staff_accounts, set_role, list_all_resources, update_resource, list_prompts, update_prompt, list_agreements, update_agreement,
     create_prompt, delete_prompt, create_resource, delete_resource, list_tests, create_test, update_test, delete_test, get_test_analytics, get_test_attempts, get_daily_activity,
-    BenchTableMissing, save_bench_results, set_bench_feedback, list_bench_results,
+    BenchTableMissing, save_bench_results, set_bench_feedback,
     create_bench_session, list_bench_sessions, get_bench_session,
     rename_bench_session, delete_bench_session, get_bench_turns, get_bench_histories,
     resolve_pending_message, list_experiment_sessions, rename_session_admin,
@@ -641,17 +641,6 @@ def bench_feedback(bench_id):
         return json_error("bench result not found", 404)
     return jsonify({"ok": True, "rating": row.get("rating"),
                     "feedback": row.get("feedback")})
-
-
-@admin_api_bp.get("/bench/history")
-@staff_required
-def bench_history():
-    """Recent bench rows for the Test Chat history panel."""
-    try:
-        return jsonify({"available": True, "results": list_bench_results()})
-    except BenchTableMissing:
-        return jsonify({"available": False, "results": [],
-                        "note": _BENCH_TABLE_HINT})
 
 
 @admin_api_bp.get("/analytics/tests")

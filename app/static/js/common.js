@@ -129,9 +129,9 @@ function setAuthMsg(text, kind = "") {
 }
 
 // Auto-name a fresh "New chat" from its first message (chat + test bench).
-async function autoTitleFromMessage(sessionId, firstMessage, onApplied) {
+async function autoTitleFromMessage(sessionID, firstMessage, onApplied) {
   const title = firstMessage.trim().slice(0, 40) || "New chat";
-  const r = await api(`/sessions/${sessionId}`, {
+  const r = await api(`/sessions/${sessionID}`, {
     method: "PATCH",
     body: JSON.stringify({ title }),
   });

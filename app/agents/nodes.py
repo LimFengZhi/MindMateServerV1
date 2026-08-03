@@ -13,8 +13,8 @@ from app.config import Config
 from app.db.repo import add_message, get_history
 
 # How many recent (user, bot) turns the chatbot sees VERBATIM — configured in
-# config.yaml (memory.recent_turns). 0 = summary-only memory: everything
-# reaches the chatbot through the compressed summary, never word-for-word.
+# config.yaml (memory.recent_turns, hybrid memory: 2). Older turns reach it
+# only through the compressed summary; 0 would mean summary-only memory.
 RECENT_TURNS = Config.RECENT_TURNS
 
 

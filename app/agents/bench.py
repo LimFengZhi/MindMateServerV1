@@ -33,14 +33,23 @@ BENCH_MODES = ("models3", "single_vs_multi")
 _FIRST_MESSAGE_SUMMARY = ("This is the user's first message — the conversation "
                           "is just beginning.")
 
-# The two extra comparison models (family-specific chat-template details).
+# The two extra comparison models (family-specific chat-template details;
+# system_prefix keeps Qwen3 in its trained non-thinking mode).
 _FAMILIES = {
     "llama32": {"label": "Llama 3.2 1B (fine-tuned)",
-                "stop": ("<|eot_id|>",), "fold_system": False},
+                "stop": ("<|eot_id|>",), "fold_system": False,
+                "system_prefix": ""},
     "qwen3": {"label": "Qwen3 1.7B (fine-tuned)",
-              "stop": ("<|im_end|>",), "fold_system": False},
+              "stop": ("<|im_end|>",), "fold_system": False,
+              "system_prefix": "/no_think\n"},
 }
 _extra_cache = {}
+
+_MAIN_LABELS = {"gemma2": "Gemma 2 2B", "qwen3": "Qwen3 1.7B",
+                "llama32": "Llama 3.2 1B"}
+MAIN_LABEL = (_MAIN_LABELS.get(Config.CHAT_MODEL_FAMILY,
+                               Config.CHAT_MODEL_FAMILY)
+              + " (current app model)")
 
 
 def _extra_model(key):
@@ -103,13 +112,15 @@ def _run_three_models(message, histories):
     summary_line = ("The conversation so far is shown in the previous messages."
                     if any_history else _FIRST_MESSAGE_SUMMARY)
     system_text = build_composed_system(diag["emotion"], summary_line)
-    results = [_timed("gemma2", "Gemma 2 2B (current app model)",
-                      lambda: _chat(chains.chatbot, system_text, message,
-                                    histories.get("gemma2")))]
+    results = [_timed("gemma2", MAIN_LABEL,
+                      lambda: _chat(chains.chatbot,
+                                    chains.CHAT_FAMILY["system_prefix"] + system_text,
+                                    message, histories.get("gemma2")))]
     for key, fam in _FAMILIES.items():
         results.append(_timed(key, fam["label"],
-                              lambda k=key: _chat(_extra_model(k), system_text,
-                                                  message, histories.get(k))))
+                              lambda k=key, f=fam: _chat(
+                                  _extra_model(k), f["system_prefix"] + system_text,
+                                  message, histories.get(k))))
     return results
 
 
@@ -122,8 +133,9 @@ def _run_single_vs_multi(message, histories):
     through the summarizer — exactly the difference being studied."""
     def single():
         try:
-            return _chat(chains.chatbot, build_single_system(), message,
-                         histories.get("single"))
+            return _chat(chains.chatbot,
+                         chains.CHAT_FAMILY["system_prefix"] + build_single_system(),
+                         message, histories.get("single"))
         except ModelUnavailable:
             # Stub mode: mirror the pipeline's stub fallback so the two
             # variants stay comparable.

@@ -1,8 +1,9 @@
-"""Idempotent seeding of the user agreement + agent prompts.
+"""Idempotent seeding of the user agreement, agent prompts, and self-tests.
 
-ensure_seed() runs on app startup. It only inserts when a table is empty, so it
-is safe to call on every boot and safe to re-run. Edit the content here (or in
-the Supabase dashboard) to change what users see.
+ensure_seed() runs on app startup and is safe to re-run: the agreement inserts
+only when its table is empty; prompts and self-tests TOP UP — any missing
+key/slug is inserted, existing rows are never touched (dashboard edits
+survive). Edit the content here (or in the dashboard) to change what users see.
 
 Resources are NOT seeded here: they are imported from the TAR UMT counselling
 self-help page by scripts/scrape_resources.py, which owns the resources table.

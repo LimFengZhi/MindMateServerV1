@@ -2,10 +2,13 @@
 conversations (Jingy2000/multi-turn-counsel-chat — CounselChat Q&A expanded to
 client/counselor dialogues with GPT-4).
 
-n_cases conversations (seeded) are replayed TEACHER-FORCED: at every client
-turn, each system answers given the dataset's own conversation so far, so
-both systems and every turn share identical context. The SAME tuned gemma2
-answers in both arms — only the app's architecture differs:
+n_cases conversations (stratified by category) are replayed FREE-RUNNING:
+the client side is scripted from the dataset, but each arm's conversation
+history is its OWN previous replies — the dataset's counselor replies are
+ignored (stored only as unused 'reference'), so the evaluation measures each
+architecture living with its own output, like deployment. The SAME tuned
+model (single_vs_multi.model_key in config.yaml) answers in both arms — only
+the app's architecture differs:
 
     pipeline_single  the app's 'single' prompt + the VERBATIM history as
                      alternating chat turns (the Test Chat bench's
@@ -69,6 +72,10 @@ N_CASES = int(SVM_CFG.get("n_cases", 10))
 MAX_CLIENT_TURNS = int(SVM_CFG.get("max_client_turns", 6))
 RAW_PATH = ft_utils.RAW_DIR / SVM_CFG.get("raw_filename", "multiturn_counselchat.json")
 HF_ID = SVM_CFG.get("hf_id", "Jingy2000/multi-turn-counsel-chat")
+CASE_CATEGORIES = SVM_CFG.get(
+    "case_categories", ["Suicidal", "Depression", "Stress", "Anxiety", "Bipolar"])
+MODEL_KEY = SVM_CFG.get("model_key", "gemma2")  # which tuned model both arms use
+LABELS_CACHE = ft_utils.PROCESSED_DIR / "counselchat_case_labels.json"
 
 # Summary wordings, matching app/agents/nodes.py summarize().
 FIRST_TURN_SUMMARY = ("This is the user's first message — the conversation is "
@@ -121,24 +128,47 @@ def composed_system_text(summary):
             .replace("{summarised_history}", summary or FIRST_TURN_SUMMARY))
 
 
-def gemma_chat_prompt(system_text, history, message):
-    """Gemma 2 chat template (no system role — the system text folds into the
-    first user turn, like the app's LocalChatModel fold_system=True), with the
-    (client, counselor) history as alternating user/model turns."""
-    parts = ["<bos>"]
-    first_user = f"{system_text}\n\n{history[0][0]}" if history else \
-                 f"{system_text}\n\n{message}"
-    if history:
-        parts.append(f"<start_of_turn>user\n{first_user}<end_of_turn>\n")
-        parts.append(f"<start_of_turn>model\n{history[0][1]}<end_of_turn>\n")
-        for client_msg, counselor_msg in history[1:]:
-            parts.append(f"<start_of_turn>user\n{client_msg}<end_of_turn>\n")
-            parts.append(f"<start_of_turn>model\n{counselor_msg}<end_of_turn>\n")
-        parts.append(f"<start_of_turn>user\n{message}<end_of_turn>\n")
-    else:
-        parts.append(f"<start_of_turn>user\n{first_user}<end_of_turn>\n")
-    parts.append("<start_of_turn>model\n")
-    return "".join(parts)
+def chat_prompt(system_text, history, message):
+    """MODEL_KEY's chat template over (system, history, message), matching the
+    app's LocalChatModel formatting for that family — Gemma folds the system
+    text into the first user turn (no system role); Qwen3 gets a real system
+    turn carrying the /no_think control the fine-tune was trained with."""
+    if MODEL_KEY == "gemma2":
+        parts = ["<bos>"]
+        first_user = f"{system_text}\n\n{history[0][0]}" if history else \
+                     f"{system_text}\n\n{message}"
+        if history:
+            parts.append(f"<start_of_turn>user\n{first_user}<end_of_turn>\n")
+            parts.append(f"<start_of_turn>model\n{history[0][1]}<end_of_turn>\n")
+            for client_msg, counselor_msg in history[1:]:
+                parts.append(f"<start_of_turn>user\n{client_msg}<end_of_turn>\n")
+                parts.append(f"<start_of_turn>model\n{counselor_msg}<end_of_turn>\n")
+            parts.append(f"<start_of_turn>user\n{message}<end_of_turn>\n")
+        else:
+            parts.append(f"<start_of_turn>user\n{first_user}<end_of_turn>\n")
+        parts.append("<start_of_turn>model\n")
+        return "".join(parts)
+
+    if MODEL_KEY == "qwen3":
+        parts = [f"<|im_start|>system\n/no_think\n{system_text}<|im_end|>\n"]
+        for client_msg, counselor_msg in history:
+            parts.append(f"<|im_start|>user\n{client_msg}<|im_end|>\n")
+            parts.append(f"<|im_start|>assistant\n{counselor_msg}<|im_end|>\n")
+        parts.append(f"<|im_start|>user\n{message}<|im_end|>\n")
+        parts.append("<|im_start|>assistant\n")
+        return "".join(parts)
+
+    if MODEL_KEY == "llama32":
+        parts = ["<|begin_of_text|><|start_header_id|>system<|end_header_id|>"
+                 f"\n\n{system_text}<|eot_id|>"]
+        for client_msg, counselor_msg in history:
+            parts.append(f"<|start_header_id|>user<|end_header_id|>\n\n{client_msg}<|eot_id|>")
+            parts.append(f"<|start_header_id|>assistant<|end_header_id|>\n\n{counselor_msg}<|eot_id|>")
+        parts.append(f"<|start_header_id|>user<|end_header_id|>\n\n{message}<|eot_id|>")
+        parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        return "".join(parts)
+
+    raise ValueError(f"unknown model_key '{MODEL_KEY}'")
 
 
 def format_history(history):
@@ -152,16 +182,73 @@ def format_history(history):
 
 
 # ---------------------------------------------------------------------------
-# Cases: seeded conversations, replayed teacher-forced
+# Cases: stratified by category, replayed teacher-forced
 # ---------------------------------------------------------------------------
-def load_cases():
-    """n_cases seeded conversations -> replay tasks. The dataset's leading
-    counselor greeting is dropped (the app has no bot-first turn; the
-    frontend welcome bubble is never part of the pipeline), leaving clean
-    (client, counselor) exchange pairs.
+def _client_text(conv):
+    return " ".join(m["content"] for m in conv["messages"]
+                    if m["role"] == "client")
 
-    Returns a list of cases: {"case": i, "turns": [{"turn", "history"
-    [(client, counselor), ...], "message", "reference"}, ...]}."""
+
+def case_labels(data):
+    """One category per conversation, assigned with the APP's own logic:
+    crisis keywords in any client turn -> 'Suicidal'; otherwise the RoBERTa
+    classifier's label over the client's concatenated messages. Cached to
+    processed/ so the 863 classifications run once."""
+    if LABELS_CACHE.exists():
+        cached = json.loads(LABELS_CACHE.read_text(encoding="utf-8"))
+        if len(cached) == len(data):
+            return cached
+
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(str(CLASSIFIER_DIR))
+    model = AutoModelForSequenceClassification.from_pretrained(str(CLASSIFIER_DIR))
+    model.eval()
+
+    labels = []
+    texts = [_client_text(d) for d in data]
+    for i in range(0, len(texts), 32):
+        enc = tok(texts[i:i + 32], return_tensors="pt", padding=True,
+                  truncation=True, max_length=512)
+        with torch.inference_mode():
+            idx = model(**enc).logits.argmax(dim=-1)
+        labels.extend(model.config.id2label[int(k)] for k in idx)
+    del model, tok
+    gc.collect()
+
+    labels = ["Suicidal" if guards.crisis_keywords_present(t) else l
+              for t, l in zip(texts, labels)]
+    LABELS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    LABELS_CACHE.write_text(json.dumps(labels), encoding="utf-8")
+    return labels
+
+
+def _select_cases(data):
+    """Seeded stratified pick: n_cases spread evenly over case_categories,
+    topped up at random if a category has too few conversations."""
+    labels = case_labels(data)
+    rng = random.Random(ft_utils.SEED)
+    per_cat = max(1, N_CASES // len(CASE_CATEGORIES))
+    picked = []
+    for cat in CASE_CATEGORIES:
+        pool = [i for i, l in enumerate(labels) if l == cat and i not in picked]
+        picked += rng.sample(pool, min(per_cat, len(pool)))
+    if len(picked) < N_CASES:
+        rest = [i for i in range(len(data)) if i not in picked]
+        picked += rng.sample(rest, N_CASES - len(picked))
+    return sorted(picked[:N_CASES]), labels
+
+
+def load_cases():
+    """The stratified cases -> replay tasks. The dataset's leading counselor
+    greeting is dropped (the app has no bot-first turn; the frontend welcome
+    bubble is never part of the pipeline), leaving clean (client, counselor)
+    exchange pairs.
+
+    Returns a list of cases: {"case": i, "category": label, "turns":
+    [{"turn", "history" [(client, counselor), ...], "message", "reference"},
+    ...]}."""
     if not RAW_PATH.exists():
         raise FileNotFoundError(
             f"{RAW_PATH} missing — download it once with:\n"
@@ -169,8 +256,7 @@ def load_cases():
             f"all_dialogue_cleaned.json -o \"{RAW_PATH}\"")
     data = json.loads(RAW_PATH.read_text(encoding="utf-8"))
 
-    rng = random.Random(ft_utils.SEED)
-    picked = sorted(rng.sample(range(len(data)), min(N_CASES, len(data))))
+    picked, labels = _select_cases(data)
 
     cases = []
     for case_id in picked:
@@ -192,12 +278,13 @@ def load_cases():
                   "reference": counselor_msg}
                  for t, (client_msg, counselor_msg)
                  in enumerate(pairs[:MAX_CLIENT_TURNS])]
-        cases.append({"case": case_id, "turns": turns})
+        cases.append({"case": case_id, "category": labels[case_id],
+                      "turns": turns})
     return cases
 
 
 def flat_turns(cases):
-    return [(c["case"], t) for c in cases for t in c["turns"]]
+    return [(c, t) for c in cases for t in c["turns"]]
 
 
 # ---------------------------------------------------------------------------
@@ -240,31 +327,33 @@ def diagnose_all(messages, batch_size=32):
     return out
 
 
-def summarize_all(olders, fulls):
-    """The APP's summarizer (SUMMARIZER_PATH weights + summarise_prompt.txt)
-    over each turn's OLDER history (the part outside the verbatim window).
-    Wordings mirror nodes.summarize: no history at all -> first-turn text;
-    history exists but none is old enough to summarize -> just-begun text."""
+def _load_summarizer():
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    todo_idx = [i for i, older in enumerate(olders) if older]
-    summaries = [FIRST_TURN_SUMMARY if not full else JUST_BEGUN_SUMMARY
-                 for full in fulls]
-    if not todo_idx:
-        return summaries
-
     tok = AutoTokenizer.from_pretrained(SUMMARIZER_ID)
     model = AutoModelForCausalLM.from_pretrained(
         SUMMARIZER_ID, dtype=torch.bfloat16, device_map="auto")
     model.eval()
+    return tok, model
 
+
+def summarize_batch(tok, model, olders, fulls):
+    """The APP's summarizer (summarise_prompt.txt, which also records what the
+    companion last asked/suggested) over each item's OLDER history — the part
+    outside the verbatim window. Wordings mirror nodes.summarize: no history
+    at all -> first-turn text; history but nothing old enough -> just-begun."""
+    import torch
+
+    summaries = [FIRST_TURN_SUMMARY if not full else JUST_BEGUN_SUMMARY
+                 for full in fulls]
     system_text = _prompt_text("summarise_prompt.txt")
-    for i in todo_idx:
+    for i, older in enumerate(olders):
+        if not older:
+            continue
         messages = [
             {"role": "system", "content": system_text},
             {"role": "user",
-             "content": f"CONVERSATION:\n{format_history(olders[i])}"},
+             "content": f"CONVERSATION:\n{format_history(older)}"},
         ]
         prompt = tok.apply_chat_template(messages, tokenize=False,
                                          add_generation_prompt=True)
@@ -279,10 +368,6 @@ def summarize_all(olders, fulls):
         text = tok.decode(out_ids[0][enc["input_ids"].shape[1]:],
                           skip_special_tokens=True).strip()
         summaries[i] = text or summaries[i]
-
-    del model, tok
-    gc.collect()
-    torch.cuda.empty_cache()
     return summaries
 
 
@@ -291,7 +376,7 @@ def summarize_all(olders, fulls):
 # ---------------------------------------------------------------------------
 SYSTEMS = ("pipeline_single", "pipeline_multi")
 GEN_MAX_LENGTH = 4096       # multi-turn single-agent prompts exceed the 1024
-                            # training window; gemma2 handles this easily
+                            # training window; these models handle it easily
 
 
 def generation_path(system):
@@ -307,8 +392,15 @@ def load_generations(system):
 
 
 def generate_and_store(system, force=False):
-    """One replay pass for 'pipeline_single' or 'pipeline_multi' -> cached
-    jsonl (one line per case x client turn)."""
+    """One FREE-RUNNING replay pass for 'pipeline_single' or 'pipeline_multi'
+    -> cached jsonl (one line per case x client turn).
+
+    Free-running: the CLIENT side is scripted from the dataset, but each
+    arm's conversation history is its OWN previous replies — the dataset's
+    counselor replies are never used as context (stored only as unused
+    'reference'). Turns therefore run depth-by-depth: every case's turn t
+    needs that case's reply t-1. The stored 'history' is the arm's own
+    conversation so far, which is also what the CEHS judge reads."""
     import torch
 
     assert system in SYSTEMS, f"unknown system '{system}'"
@@ -316,8 +408,8 @@ def generate_and_store(system, force=False):
     if path.exists() and not force:
         print(f"[cached]  {path.name}")
         return path
-    if not evaluator.adapter_available("gemma2"):
-        print(f"[skipped] {path.name} — gemma2 adapter not trained yet")
+    if not evaluator.adapter_available(MODEL_KEY):
+        print(f"[skipped] {path.name} — {MODEL_KEY} adapter not trained yet")
         return None
     if not classifier_available():
         print(f"[skipped] {path.name} — classifier weights missing "
@@ -325,59 +417,82 @@ def generate_and_store(system, force=False):
         return None
 
     cases = load_cases()
-    tasks = flat_turns(cases)
-    print(f"[running] {path.name} ({len(cases)} cases, {len(tasks)} client turns)")
+    n_turns = sum(len(c["turns"]) for c in cases)
+    print(f"[running] {path.name} ({len(cases)} cases, {n_turns} client turns, "
+          f"free-running)")
     start = time.time()
 
-    diags = diagnose_all([t["message"] for _, t in tasks])
+    # Diagnosis depends only on the scripted client message — same either way.
+    all_tasks = flat_turns(cases)
+    diags = diagnose_all([t["message"] for _, t in all_tasks])
+    diag_map = {(c["case"], t["turn"]): d
+                for (c, t), d in zip(all_tasks, diags)}
 
-    if system == "pipeline_single":
-        sys_text = single_system_text()
-        gen_idx = list(range(len(tasks)))
-        prompts = [gemma_chat_prompt(sys_text, t["history"], t["message"])
-                   for _, t in tasks]
-        summaries = [None] * len(tasks)
-        recents = [t["history"] for _, t in tasks]
-    else:
-        # The app's memory windowing (nodes.load_context): the last
-        # RECENT_TURNS exchanges verbatim, the rest through the summary.
-        fulls = [t["history"] for _, t in tasks]
-        recents = [h[-RECENT_TURNS:] if RECENT_TURNS > 0 else [] for h in fulls]
-        olders = [h[:-RECENT_TURNS] if RECENT_TURNS > 0 else list(h)
-                  for h in fulls]
-        summaries = summarize_all(olders, fulls)
-        gen_idx = [i for i, d in enumerate(diags) if not d["escalated"]]
-        prompts = [gemma_chat_prompt(composed_system_text(summaries[i]),
-                                     recents[i], tasks[i][1]["message"])
-                   for i in gen_idx]
-        skipped = len(tasks) - len(gen_idx)
-        if skipped:
-            print(f"          {skipped} escalated turn(s) get the fixed "
-                  f"crisis message")
-
-    model, tokenizer = evaluator.load_system("gemma2", "tuned")
+    model, tokenizer = evaluator.load_system(MODEL_KEY, "tuned")
     tokenizer.truncation_side = "left"        # long histories drop OLD turns
-    gen_preds = evaluator.generate_predictions(
-        model, tokenizer, prompts, "gemma2",
-        prompt_fn=lambda p: p, max_length=GEN_MAX_LENGTH)
+    sum_tok = sum_model = None
+    if system == "pipeline_multi":
+        sum_tok, sum_model = _load_summarizer()
+    sys_text_single = single_system_text()
+
+    own_hist = {c["case"]: [] for c in cases}
+    records = []
+    max_depth = max(len(c["turns"]) for c in cases)
+    for depth in range(max_depth):
+        active = [(c, c["turns"][depth]) for c in cases
+                  if len(c["turns"]) > depth]
+        fulls = [own_hist[c["case"]] for c, _ in active]
+
+        if system == "pipeline_multi":
+            # The app's memory windowing (nodes.load_context) over OWN history.
+            recents = [h[-RECENT_TURNS:] if RECENT_TURNS > 0 else []
+                       for h in fulls]
+            olders = [h[:-RECENT_TURNS] if RECENT_TURNS > 0 else list(h)
+                      for h in fulls]
+            summaries = summarize_batch(sum_tok, sum_model, olders, fulls)
+        else:
+            recents = fulls                    # single sees everything verbatim
+            summaries = [None] * len(active)
+
+        prompts, gen_slots = [], []
+        for i, (c, t) in enumerate(active):
+            d = diag_map[(c["case"], t["turn"])]
+            if system == "pipeline_multi" and d["escalated"]:
+                continue                       # crisis routing: fixed message
+            stext = (sys_text_single if system == "pipeline_single"
+                     else composed_system_text(summaries[i]))
+            prompts.append(chat_prompt(stext, recents[i], t["message"]))
+            gen_slots.append(i)
+
+        preds = evaluator.generate_predictions(
+            model, tokenizer, prompts, MODEL_KEY,
+            prompt_fn=lambda p: p, max_length=GEN_MAX_LENGTH) if prompts else []
+        replies = [CRISIS_MESSAGE] * len(active)
+        for slot, pred in zip(gen_slots, preds):
+            replies[slot] = pred
+
+        for i, (c, t) in enumerate(active):
+            records.append({
+                "case": c["case"], "category": c["category"], "turn": t["turn"],
+                "history": list(own_hist[c["case"]]), "message": t["message"],
+                "reference": t["reference"], "prediction": replies[i],
+                "summary": summaries[i], "verbatimTurns": len(recents[i]),
+                **diag_map[(c["case"], t["turn"])],
+            })
+            own_hist[c["case"]].append((t["message"], replies[i]))
+        print(f"    depth {depth + 1}/{max_depth} done")
+
     del model, tokenizer
+    if sum_model is not None:
+        del sum_model, sum_tok
     gc.collect()
     torch.cuda.empty_cache()
 
-    predictions = [CRISIS_MESSAGE] * len(tasks)
-    for idx, pred in zip(gen_idx, gen_preds):
-        predictions[idx] = pred
-
+    records.sort(key=lambda r: (r["case"], r["turn"]))
     evaluator.GEN_DIR.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        for (case_id, t), pred, diag, summary, recent in zip(
-                tasks, predictions, diags, summaries, recents):
-            f.write(json.dumps({
-                "case": case_id, "turn": t["turn"],
-                "history": t["history"], "message": t["message"],
-                "reference": t["reference"], "prediction": pred,
-                "summary": summary, "verbatimTurns": len(recent), **diag,
-            }, ensure_ascii=False) + "\n")
+        for r in records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"          done in {(time.time() - start) / 60:.1f} min -> {path.name}")
     return path
 
@@ -424,21 +539,25 @@ def parse_cehs_output(text):
     return {"scores": scores, "justification": str(data.get("justification", ""))}
 
 
-def judge_cehs(client, records_by_system, out_path, delay=1.1, max_retries=5):
+def judge_cehs(client, records_by_system, out_path, delay=1.1, max_retries=5,
+               model=None):
     """Judge every (system, case, turn) reply once. Appends jsonl lines with
     custom_id '<system>__<case>_<turn>' and skips ids already present, so
     interrupting and re-running is always safe (same contract as
-    llm_judge.judge_many)."""
+    llm_judge.judge_many). model overrides the primary judge (second-judge
+    runs pass their own model + a slower delay)."""
     import openai
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    done = set()
+    done = set()  # only SUCCESSFUL verdicts — failures are retried on re-run
     if out_path.exists():
         with open(out_path, encoding="utf-8") as f:
             for line in f:
                 try:
-                    done.add(json.loads(line)["custom_id"])
+                    rec = json.loads(line)
+                    if rec.get("ok"):
+                        done.add(rec["custom_id"])
                 except (json.JSONDecodeError, KeyError):
                     pass
 
@@ -447,13 +566,21 @@ def judge_cehs(client, records_by_system, out_path, delay=1.1, max_retries=5):
     todo = [t for t in todo if t[0] not in done]
     print(f"{len(todo)} replies to judge ({len(done)} already in {out_path.name})")
 
+    # A killed run can leave a final line without its newline — appending
+    # would glue records. Make sure the file ends cleanly first.
+    if out_path.exists() and out_path.stat().st_size:
+        with open(out_path, "rb+") as _f:
+            _f.seek(-1, 2)
+            if _f.read(1) != b"\n":
+                _f.write(b"\n")
+
     with open(out_path, "a", encoding="utf-8") as f:
         for n, (custom_id, r) in enumerate(todo, 1):
             prompt = build_cehs_prompt(r["history"], r["message"], r["prediction"])
             record = {"custom_id": custom_id, "ok": False, "error": "not attempted"}
             for attempt in range(max_retries):
                 try:
-                    resp = llm_judge._chat(client, llm_judge.JUDGE_MODEL, prompt)
+                    resp = llm_judge._chat(client, model or llm_judge.JUDGE_MODEL, prompt)
                     text = resp.choices[0].message.content or ""
                     record = {"custom_id": custom_id, "ok": True,
                               **parse_cehs_output(text)}

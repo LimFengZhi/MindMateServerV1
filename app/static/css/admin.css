@@ -110,7 +110,6 @@
 .text-plain { color: var(--text); }
 .danger-text { color: var(--danger); }
 .dash-textarea.code-area { min-height: 200px; margin-bottom: 12px; font-family: monospace; font-size: 13px; }
-.dash-textarea.tall { min-height: 200px; margin-bottom: 12px; }
 /* Agreement editor: the full legal text must be comfortably readable. */
 .dash-textarea.agreement-edit {
   min-height: 480px; margin-bottom: 12px;
@@ -153,18 +152,6 @@
 }
 .star-btn:hover { transform: scale(1.15); }
 .star-btn.on { color: #ffd166; }
-.bench-hist-row {
-  display: flex; justify-content: space-between; gap: 14px;
-  padding: 10px 0; border-bottom: 1px dashed var(--border);
-}
-.bench-hist-row:last-child { border-bottom: 0; }
-.bench-hist-main { min-width: 0; }
-.bench-hist-prompt { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
-.bench-hist-reply { font-size: 12.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bench-hist-side { flex: 0 0 auto; text-align: right; }
-.bench-hist-rating { color: #ffd166; font-size: 13px; letter-spacing: 1px; }
-.bench-hist-fb { font-size: 11.5px; color: var(--muted); max-width: 180px; margin-top: 3px; }
-.small-text { font-size: 11.5px; margin-left: 8px; }
 
 /* Individual attempt logs inside the Test Analysis cards. */
 .logs-toggle { margin-top: 14px; }
@@ -301,19 +288,6 @@
   background: var(--surface-2); border: 1px solid var(--border);
 }
 .sess-badge.done { color: var(--ok); border-color: rgba(52, 211, 153, .4); background: rgba(52, 211, 153, .1); }
-
-/* test target cards (one selectable for now) */
-.test-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 14px; margin-bottom: 18px; }
-.test-card {
-  padding: 16px; cursor: pointer;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  transition: border-color .15s, background .15s, transform .12s;
-}
-.test-card:hover { border-color: rgba(79, 140, 255, .4); transform: translateY(-2px); }
-.test-card.selected { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
-.test-card.disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
-.test-card h3 { margin: 0 0 6px; font-size: 16px; }
-.test-card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
 
 /* test bench — a real-chat layout: history sidebar + bubbles + composer */
 .test-layout { flex: 1; display: flex; overflow: hidden; }

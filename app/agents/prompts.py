@@ -1,7 +1,7 @@
 """Prompt templates + message helpers.
 
 The TEXT of the system prompts stays admin-editable in the DB (via
-app/prompt_builder/loader.py, ~15 s cache) — it flows into these templates as
+prompt_loader.py, ~15 s cache) — it flows into these templates as
 a VALUE (`{system_text}`), never as a template, so literal braces in
 admin-edited text can't break formatting. The templates define the message
 STRUCTURE; the loader owns the words.

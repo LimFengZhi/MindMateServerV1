@@ -148,8 +148,19 @@ judge:
   model: glm-4.7-flash          # free on Z.ai (rate limit ~1 req/s on the free tier)
   base_url: https://api.z.ai/api/paas/v4   # Z.ai's OpenAI-compatible endpoint
   api_key_env: GLM_API_KEY      # read from the project .env
-  max_tokens: 1024
+  # 4096: thinking judges (gemini-3.5-flash) spend reasoning tokens INSIDE
+  # this budget — at 1024 the visible JSON verdict came back truncated.
+  max_tokens: 4096
   n_samples: 200                # judged questions, sampled with the top-level seed
+  # Optional SECOND judge (inter-judge agreement): Gemini Flash through
+  # Google's OpenAI-compatible endpoint. Used only when the key env is set.
+  second:
+    # gemini-2.5-flash is closed to new accounts (404) — 3.5 is the current
+    # full-Flash tier this key can use. Paid billing: no daily quota.
+    model: gemini-3.5-flash
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env: GEMINI_API_KEY
+    delay: 0.2                  # paid tier allows 150+ requests/min
 
 # ---------------------------------------------------------------------------
 # Single-agent vs multi-agent pipeline evaluation
@@ -164,5 +175,11 @@ judge:
 single_vs_multi:
   hf_id: Jingy2000/multi-turn-counsel-chat
   raw_filename: multiturn_counselchat.json   # cached under data_root/raw/
-  n_cases: 10           # conversations, seeded from the top-level seed
+  model_key: qwen3      # which tuned model answers in BOTH arms (matches the app)
+  n_cases: 10           # total conversations (n_cases / len(categories) each)
   max_client_turns: 6   # client turns replayed per conversation (cost cap)
+  # Stratified case selection: each conversation is categorized by the APP's
+  # own logic (crisis keywords in any client turn -> Suicidal, else the
+  # RoBERTa classifier over the client's concatenated messages), then an equal
+  # seeded sample is drawn from every category below.
+  case_categories: [Suicidal, Depression, Stress, Anxiety, Bipolar]

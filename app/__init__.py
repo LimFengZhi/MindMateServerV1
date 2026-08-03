@@ -35,7 +35,8 @@ def create_app(load_models=True, seed=True):
 
 
 def _seed_database():
-    """Seed the agreement + sample resources on first boot (idempotent)."""
+    """Seed the agreement, prompts, and self-tests (idempotent; resources
+    are owned by scripts/scrape_resources.py, never seeded here)."""
     try:
         from app.db.seed import ensure_seed
         ensure_seed()

@@ -87,6 +87,10 @@ class Config:
     AI_MODE = _env("AI_MODE", "stub").lower()
 
     CHAT_MODEL_PATH = _abspath(_env("CHAT_MODEL_PATH", "models/chat_models/merged/gemma2"))
+    # Which model FAMILY the chatbot weights are (drives chat-template details
+    # in chains.py: system-role support, stop token, thinking control).
+    # Keep in sync with CHAT_MODEL_PATH: gemma2 | qwen3 | llama32.
+    CHAT_MODEL_FAMILY = _env("CHAT_MODEL_FAMILY", "gemma2").lower()
     CLASSIFIER_PATH = _abspath(_env("CLASSIFIER_PATH", "models/classifier_models/roberta"))
     SUMMARIZER_PATH = _env("SUMMARIZER_PATH", "Qwen/Qwen2.5-0.5B-Instruct")
 

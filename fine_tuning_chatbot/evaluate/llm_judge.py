@@ -58,17 +58,28 @@ def build_judge_prompt(question, response):
             .replace("<<RESPONSE>>", response.strip()))
 
 
-def make_client():
-    """OpenAI-compatible client pointed at Z.ai. Key comes from the .env var
-    named in config (GLM_API_KEY) — free key at https://z.ai"""
+def make_client(cfg=None):
+    """OpenAI-compatible client for a judge config block (default: the
+    primary `judge:` block). The API key comes from the .env var the block
+    names (api_key_env)."""
     from openai import OpenAI
 
-    key = os.getenv(JUDGE_KEY_ENV)
+    cfg = cfg or JUDGE_CFG
+    key_env = cfg.get("api_key_env", JUDGE_KEY_ENV)
+    key = os.getenv(key_env)
     if not key:
         raise RuntimeError(
-            f"{JUDGE_KEY_ENV} is empty — get a free key at https://z.ai and "
-            "paste it into the project .env file")
-    return OpenAI(api_key=key, base_url=JUDGE_BASE_URL)
+            f"{key_env} is empty — add it to the project .env file")
+    return OpenAI(api_key=key, base_url=cfg.get("base_url", JUDGE_BASE_URL))
+
+
+def second_judge():
+    """(client, model, delay) for the optional judge.second config block, or
+    None when the block or its API key is missing."""
+    cfg = JUDGE_CFG.get("second")
+    if not cfg or not os.getenv(cfg.get("api_key_env", "")):
+        return None
+    return make_client(cfg), cfg["model"], float(cfg.get("delay", 1.1))
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +127,9 @@ def judge_many(client, items, out_path, delay=1.1, max_retries=5, model=None):
     free tier allows ~1 request/second, hence the delay.
 
     Appends one jsonl line per item to out_path AS IT GOES and skips ids
-    already present, so interrupting and re-running is always safe."""
+    already judged SUCCESSFULLY, so interrupting and re-running is always
+    safe — and failed verdicts are retried on the next run (loaders keep the
+    last ok line per id)."""
     import openai
 
     out_path = Path(out_path)
@@ -126,12 +139,22 @@ def judge_many(client, items, out_path, delay=1.1, max_retries=5, model=None):
         with open(out_path, encoding="utf-8") as f:
             for line in f:
                 try:
-                    done.add(json.loads(line)["custom_id"])
+                    rec = json.loads(line)
+                    if rec.get("ok"):
+                        done.add(rec["custom_id"])
                 except (json.JSONDecodeError, KeyError):
                     pass
 
     todo = [item for item in items if item[0] not in done]
     print(f"{len(todo)} to judge ({len(done)} already in {out_path.name})")
+
+    # A killed run can leave a final line without its newline — appending
+    # would glue records. Make sure the file ends cleanly first.
+    if out_path.exists() and out_path.stat().st_size:
+        with open(out_path, "rb+") as _f:
+            _f.seek(-1, 2)
+            if _f.read(1) != b"\n":
+                _f.write(b"\n")
 
     with open(out_path, "a", encoding="utf-8") as f:
         for n, (custom_id, question, response) in enumerate(todo, 1):
