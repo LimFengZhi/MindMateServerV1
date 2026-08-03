@@ -23,13 +23,17 @@ chatbot:
 
 summarizer:
   # Long-term-memory summaries (greedy decoding — deterministic).
-  max_new_tokens: 50
+  # 120: at 50 the summaries of long counseling chats were cut mid-sentence
+  # and lost the details the reply needed (single-vs-multi evaluation).
+  max_new_tokens: 120
 
 memory:
-  # How many recent (user, bot) turns the chatbot sees VERBATIM.
-  # 0 = summary-only memory: the model never sees its own prior replies, so it
-  # can't imitate their length, and the rules stay next to the current message.
-  recent_turns: 0
+  # How many recent (user, bot) turns the chatbot sees VERBATIM; older turns
+  # reach it only through the summary. 2 = hybrid memory: the last two
+  # exchanges stay word-for-word (so replies can reference specifics and the
+  # 'first message' rule can't misfire mid-chat), everything older is
+  # compressed. 0 = summary-only (the earlier research design).
+  recent_turns: 2
 
 risk:
   # Classifier label that counts as suicide risk.
@@ -43,7 +47,7 @@ risk:
 # escalates. `enabled` is the on/off switch; the SMTP credentials are secrets
 # and stay in .env (SMTP_HOST etc.). The body reuses crisis_message below.
 crisis_email:
-  enabled: false
+  enabled: true
   subject: "MindMate — someone is available to talk"
   intro: >-
     You reached out about something heavy today. Here is the counselling

@@ -112,7 +112,8 @@ class Config:
     # --- Crisis email (counselling info sent to the user on escalation) ---
     # SMTP credentials are machine secrets (.env); the on/off toggle, subject,
     # intro line, and cooldown are app tuning (config.yaml crisis_email block).
-    SMTP_HOST = _env("SMTP_HOST")
+    # Host/port default to Gmail — only SMTP_USER + SMTP_PASSWORD are required.
+    SMTP_HOST = _env("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT = int(_env("SMTP_PORT", "587") or 587)
     SMTP_USER = _env("SMTP_USER")
     SMTP_PASSWORD = _env("SMTP_PASSWORD")

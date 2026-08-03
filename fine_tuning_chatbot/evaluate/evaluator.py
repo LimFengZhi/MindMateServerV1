@@ -98,9 +98,13 @@ def load_system(model_key, variant):
 
 
 def generate_predictions(model, tokenizer, inputs_list, model_key,
-                         max_new_tokens=200, batch_size=8):
+                         max_new_tokens=200, batch_size=8, prompt_fn=None,
+                         max_length=None):
     """Batched greedy generation. Decodes WITHOUT skipping special tokens so
-    clean_output can cut at the first end-of-turn marker."""
+    clean_output can cut at the first end-of-turn marker. prompt_fn overrides
+    the default no-system-prompt template (single_vs_multi passes prompts that
+    already carry a system text, with an identity prompt_fn); max_length
+    overrides the training window when prompts carry long histories."""
     import torch
 
     model.eval()
@@ -108,9 +112,9 @@ def generate_predictions(model, tokenizer, inputs_list, model_key,
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    prompt_fn = ft_utils.PROMPT_FORMATTERS[model_key]
+    prompt_fn = prompt_fn or ft_utils.PROMPT_FORMATTERS[model_key]
     stop_ids = _stop_token_ids(tokenizer, model_key)
-    max_len = ft_utils.CFG["training"]["max_seq_length"]
+    max_len = max_length or ft_utils.CFG["training"]["max_seq_length"]
     predictions = []
     for i in range(0, len(inputs_list), batch_size):
         prompts = [prompt_fn(x) for x in inputs_list[i:i + batch_size]]

@@ -150,3 +150,19 @@ judge:
   api_key_env: GLM_API_KEY      # read from the project .env
   max_tokens: 1024
   n_samples: 200                # judged questions, sampled with the top-level seed
+
+# ---------------------------------------------------------------------------
+# Single-agent vs multi-agent pipeline evaluation
+# (evaluate/evaluate_single_vs_multi.ipynb): MULTI-TURN counseling cases from
+# CounselChat (GPT-4-expanded dialogues) replayed teacher-forced through both
+# architectures — single = 'single' prompt + verbatim history, multi = the
+# app pipeline (RoBERTa diagnosis + crisis routing + summarizer memory, no
+# verbatim history). Replies are scored on the SoulChat CEHS rubric
+# (Table 2, arXiv:2311.00273) by the same GLM judge the `judge:` block
+# configures.
+# ---------------------------------------------------------------------------
+single_vs_multi:
+  hf_id: Jingy2000/multi-turn-counsel-chat
+  raw_filename: multiturn_counselchat.json   # cached under data_root/raw/
+  n_cases: 10           # conversations, seeded from the top-level seed
+  max_client_turns: 6   # client turns replayed per conversation (cost cap)
