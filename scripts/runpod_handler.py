@@ -42,6 +42,16 @@ def _bench(inp):
                                  inp.get("histories") or {})}
 
 
+def _report(inp):
+    """The session-analysis report's LLM step. Pure compute: the Flask side
+    reads the report data from the DB and keeps the cache; only the analysis
+    text is generated here."""
+    from app.agents.report import generate_analysis
+    if not inp.get("data"):
+        return {"error": "missing input fields: data"}
+    return {"analysis": generate_analysis(inp["data"])}
+
+
 def _chat(inp):
     missing = [k for k in ("user_id", "session_id", "message")
                if not inp.get(k)]
@@ -57,8 +67,11 @@ def _chat(inp):
 
 def handler(event):
     inp = (event or {}).get("input") or {}
-    if (inp.get("action") or "chat") == "bench":
+    action = inp.get("action") or "chat"
+    if action == "bench":
         return _bench(inp)
+    if action == "report":
+        return _report(inp)
     return _chat(inp)
 
 

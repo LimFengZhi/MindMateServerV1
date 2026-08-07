@@ -11,6 +11,8 @@ Job contract (both sides of it live in this repo):
           output = answer()'s payload dict, or {"error": "session_deleted"}
     bench input  = {"action": "bench", "mode", "message", "histories"}
           output = {"results": run_bench()'s list}
+    report input = {"action": "report", "data": <report-data dict>}
+          output = {"analysis": "<text>"}
     Any output may instead be {"error": "<detail>"}.
 """
 import time
@@ -97,3 +99,15 @@ def runpod_bench(mode, message, histories=None):
     if not isinstance(results, list):
         raise RunpodError(f"unexpected bench output: {output!r}")
     return results
+
+
+def runpod_report_analysis(data):
+    """The session-analysis report's LLM step via the serverless endpoint.
+    Same return value as report.generate_analysis()."""
+    output = _run_job({"action": "report", "data": data})
+    if output.get("error"):
+        raise RunpodError(f"worker error: {output['error']}")
+    analysis = output.get("analysis")
+    if not isinstance(analysis, str) or not analysis.strip():
+        raise RunpodError(f"unexpected report output: {output!r}")
+    return analysis

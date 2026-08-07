@@ -484,8 +484,23 @@ def users_overview_api():
 def generate_user_report(user_id):
     """Generate the session-analysis report for one user's recent sessions
     (summarizer model + the 'session_analysis' DB prompt)."""
-    from app.agents.report import build_session_report
-    report = build_session_report(user_id)
+    from app.agents.report import build_session_report, generate_analysis
+    from app.config import Config
+
+    analysis_fn = None
+    if Config.INFERENCING_CLIENT == "runpod":
+        # LLM step on the serverless worker; on failure fall back to the local
+        # chain (stub when models are off) so the report always generates.
+        from app.agents.runpod_client import RunpodError, runpod_report_analysis
+
+        def analysis_fn(data):
+            try:
+                return runpod_report_analysis(data)
+            except RunpodError as e:
+                current_app.logger.warning("RunPod report analysis failed: %s", e)
+                return generate_analysis(data)
+
+    report = build_session_report(user_id, analysis_fn=analysis_fn)
     if report is None:
         return json_error("user not found", 404)
     _report_cache[user_id] = report

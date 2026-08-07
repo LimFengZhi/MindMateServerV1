@@ -99,9 +99,17 @@ analysis_chain = (
 ).with_fallbacks([RunnableLambda(_stub_analysis)])
 
 
-def build_session_report(user_id):
+def generate_analysis(data):
+    """The LLM (or stub-fallback) analysis for one report-data dict — the
+    compute piece that runs on the RunPod worker when INFERENCING_CLIENT=runpod
+    (the 'report' action in scripts/runpod_handler.py)."""
+    return analysis_chain.invoke({"data": data})
+
+
+def build_session_report(user_id, analysis_fn=None):
     """The full report dict the dashboard shows and the PDF renders, or None
-    for an unknown user."""
+    for an unknown user. `analysis_fn` (data -> text) overrides where the
+    analysis is generated; default is the local chain."""
     data = get_user_report_data(user_id,
                                 recent_sessions=Config.REPORT_RECENT_SESSIONS)
     if data is None:
@@ -130,5 +138,5 @@ def build_session_report(user_id):
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "sessionCount": len(session_stats),
         "sessions": session_stats,
-        "analysis": analysis_chain.invoke({"data": data}),
+        "analysis": (analysis_fn or generate_analysis)(data),
     }
