@@ -6,16 +6,15 @@ models/
 *.log
 .claude/settings.local.json
 
-# --- fine-tuning pipeline (fine_tuning_chatbot/) ---
+# --- fine-tuning study ---
+# The study is its OWN repository, cloned into this folder (its README
+# documents why it must sit here: it reads ../data, ../models and the app's
+# config by relative path). This repo ignores it entirely.
+fine_tuning_chatbot/
 # data and model weights are NOT git-tracked
 /data/
 checkpoints/
 *.safetensors
 *.bin
 .ipynb_checkpoints/
-fine_tuning_chatbot/checkpoints/*
-fine_tuning_chatbot/_pycache__/
-fine_tuning_chatbot/.ipynb_checkpoints
-fine_tuning_chatbot/results/predictions/*
-fine_tuning_chatbot/results/llm_judge/responses/*
 .vscode/

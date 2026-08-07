@@ -1,7 +1,0 @@
-model,variant,n,bertscore_f1,bleu,rouge_l,flesch_reading_ease
-gemma2,tuned,1470,0.8839,0.0867,0.2366,45.3
-gemma2,base,1470,0.849,0.0369,0.174,50.11
-llama32,tuned,1470,0.8814,0.0835,0.227,44.15
-llama32,base,1470,0.8561,0.044,0.177,51.16
-qwen3,tuned,1470,0.8836,0.0858,0.2351,44.88
-qwen3,base,1470,0.8519,0.0377,0.1721,54.43

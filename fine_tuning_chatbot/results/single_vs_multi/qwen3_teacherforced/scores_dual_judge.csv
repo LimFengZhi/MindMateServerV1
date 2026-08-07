@@ -1,5 +1,0 @@
-system,judge,n,content,empathy,helpfulness,safety,total
-single,glm-4.7-flash,60,1.933,1.25,1.317,1.0,5.5
-multi,glm-4.7-flash,60,1.983,1.233,1.25,1.0,5.467
-single,gemini-3.5-flash,60,1.933,1.233,1.483,0.983,5.633
-multi,gemini-3.5-flash,60,1.967,1.267,1.383,0.983,5.6
