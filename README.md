@@ -145,6 +145,9 @@ including your admin login. Full checklist, in order:
 
 Voice (speech-to-text) uses **faster-whisper** and works in either mode once the
 package is installed. Without it, the mic button reports "voice unavailable".
+It is loaded at **startup in both modes** — so `stub` boot pays for the whisper
+model (a few seconds; `WHISPER_MODEL=tiny` in `.env` makes it quicker) but the
+first voice message doesn't stall on a cold load.
 
 Check what's loaded at any time: <http://localhost:5000/health>.
 

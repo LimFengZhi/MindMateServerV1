@@ -4,8 +4,9 @@ When AI_MODE=real the registry loads the local ML models. If any model fails to
 load (missing files, no GPU, OOM), that component stays unavailable and its
 agent falls back to a lightweight rule-based stub — the app keeps running.
 
-Heavy imports (torch, transformers, faster_whisper) happen INSIDE the loaders so
-stub-mode boot stays instant.
+Heavy imports (torch, transformers, faster_whisper) happen INSIDE the loaders,
+so importing this module is always cheap. In stub mode boot only pays for the
+voice model — the text models are skipped entirely.
 """
 from app.config import Config
 
@@ -52,9 +53,14 @@ class ModelRegistry:
 
     # ------------------------------------------------------------------ loaders
     def load_all(self):
-        """Load the text models if AI_MODE=real. Voice is loaded lazily on use."""
+        """Preload at boot. Voice loads in EITHER AI_MODE — it has no stub to
+        fall back on (a missing model just disables the mic), and paying for it
+        at startup keeps the first voice message from stalling on a cold load.
+        The text models load only when AI_MODE=real."""
+        self.load_voice()
         if not self.real_mode:
-            print("[ml] AI_MODE=stub — using rule-based agents (no models loaded).")
+            print("[ml] AI_MODE=stub — using rule-based agents "
+                  "(no text models loaded).")
             return
         self.load_classifier()
         self.load_summarizer()
@@ -151,8 +157,11 @@ class ModelRegistry:
 
     def load_voice(self):
         """Voice is independent of AI_MODE — it works whenever faster-whisper is
-        installed. Returns True if the model is ready. A failed load is only
-        attempted once (per process) so it isn't retried on every request."""
+        installed. Called at boot by load_all(); still called per request by
+        voice.py, which is then a no-op (and the safety net when the app was
+        built with load_models=False). Returns True if the model is ready. A
+        failed load is only attempted once per process, so a machine without
+        faster-whisper doesn't retry on every request."""
         if self.voice_ready:
             return True
         if self.voice_attempted:
