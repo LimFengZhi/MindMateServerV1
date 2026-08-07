@@ -2,11 +2,13 @@
 import os
 import tempfile
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 
 from app.agents import answer
+from app.agents.runpod_client import RunpodError, runpod_answer
 from app.agents.voice import transcribe, voice_available
 from app.auth.decorators import login_required, get_owned_session
+from app.config import Config
 from app.db.repo import SessionDeleted
 from app.extensions import limiter
 from app.http_utils import json_error
@@ -22,6 +24,15 @@ def user_or_ip():
     """Rate-limit key: per user when logged in, per IP otherwise."""
     user = getattr(g, "user", None)
     return user["id"] if user else request.remote_addr
+
+
+def _infer(session_id, message, mode):
+    """One chat turn via the configured inference client (.env
+    INFERENCING_CLIENT): "local" runs the in-process pipeline, "runpod"
+    forwards to the serverless endpoint. Same payload either way."""
+    if Config.INFERENCING_CLIENT == "runpod":
+        return runpod_answer(g.user["id"], session_id, message, mode=mode)
+    return answer(g.user["id"], session_id, message, mode=mode)
 
 
 # ---------------- Text chat ----------------
@@ -42,11 +53,15 @@ def chat():
         return json_error("invalid session", 403)
 
     try:
-        return jsonify(answer(g.user["id"], session_id, message,
-                              mode=session.get("mode") or "multi"))
+        return jsonify(_infer(session_id, message,
+                              session.get("mode") or "multi"))
     except SessionDeleted:
         # The chat was deleted while the reply was generating.
         return json_error("this chat no longer exists", 404)
+    except RunpodError as e:
+        current_app.logger.warning("RunPod inference failed: %s", e)
+        return json_error("the AI service is unavailable right now — "
+                          "please try again in a moment", 503)
 
 
 # ---------------- Voice chat ----------------
@@ -102,10 +117,13 @@ def chat_voice():
         return json_error("could not transcribe audio", 422)
 
     try:
-        payload = answer(g.user["id"], session_id, message,
-                         mode=session.get("mode") or "multi")
+        payload = _infer(session_id, message, session.get("mode") or "multi")
     except SessionDeleted:
         # The chat was deleted while the reply was generating.
         return json_error("this chat no longer exists", 404)
+    except RunpodError as e:
+        current_app.logger.warning("RunPod inference failed: %s", e)
+        return json_error("the AI service is unavailable right now — "
+                          "please try again in a moment", 503)
     payload["transcript"] = message
     return jsonify(payload)

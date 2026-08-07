@@ -86,6 +86,17 @@ class Config:
     # "real" = load local ML models, falling back to stub per component on error.
     AI_MODE = _env("AI_MODE", "stub").lower()
 
+    # --- Inference client ---
+    # "local" (default) = run the pipeline in-process (answer()).
+    # "runpod" = forward chat turns to a RunPod serverless endpoint running
+    # scripts/runpod_handler.py against the same Supabase project.
+    INFERENCING_CLIENT = _env("INFERENCING_CLIENT", "local").lower()
+    RUNPOD_ENDPOINT_ID = _env("RUNPOD_ENDPOINT_ID")
+    RUNPOD_API_KEY = _env("RUNPOD_API_KEY")
+    # Total seconds to wait for a job — must cover a serverless cold start
+    # (worker boot + model load), not just generation.
+    RUNPOD_TIMEOUT_S = int(_env("RUNPOD_TIMEOUT_S", "300") or 300)
+
     CHAT_MODEL_PATH = _abspath(_env("CHAT_MODEL_PATH", "models/chat_models/merged/gemma2"))
     # Which model FAMILY the chatbot weights are (drives chat-template details
     # in chains.py: system-role support, stop token, thinking control).
