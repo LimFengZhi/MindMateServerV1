@@ -212,8 +212,16 @@ async function deleteSession(id) {
   const r = await api(`/sessions/${id}`, { method: "DELETE" });
   if (r.error) { alert(r.error); return; }
   sessions = sessions.filter((x) => x.sessionID !== id);
-  if (id === sessionID) startBlank();
-  else renderSessionList();
+  if (id === sessionID) {
+    // Land the user in the blank chat ready to type: close the mobile drawer
+    // (its scrim covers the composer) and take focus back from the confirm()
+    // dialog. Deleting a background chat keeps the list open instead.
+    startBlank();
+    if (isMobileViewport()) closeSidebar();
+    else $("message").focus();
+  } else {
+    renderSessionList();
+  }
 }
 
 // Auto-name a fresh chat after its first message.
