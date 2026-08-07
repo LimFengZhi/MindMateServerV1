@@ -1,312 +1,213 @@
-# MindMate — Multi-Agent Mental-Health Companion (Supabase edition)
+# MindMate — Multi-Agent Mental-Health Companion
 
 A Flask app where users chat with a warm, non-clinical AI companion. Behind each
 reply is a multi-agent pipeline: an emotion classifier, a crisis-escalation
-router, a conversation summariser, and a chatbot. Around the chat it offers:
+router, a conversation summariser, and a fine-tuned chatbot. Data and auth live
+in Supabase (Postgres + email-verified accounts).
 
-- **My Emotions** — per-session emotion analysis (dominant emotion, distribution, timeline)
-- **Resources** — in-app self-help guides & calming exercises (content lives in
-  the DB with a reference link to the original source; based on the TAR UMT
-  Student Counselling Service collection)
-- **Self-Tests** — PSS-10 stress, Rosenberg self-esteem, PHQ-9 depression, and
-  a Suicide Risk Check (adapted from the SWSPHN clinical screening tool),
-  scored server-side, with crisis contacts attached when needed — shown first
-  on the Suicide Risk Check result; chat replies flagged as elevated risk
-  link straight into that quiz
-- **Staff site** — a separate `/admin` dashboard where staff see usage stats and
-  admins create staff accounts by email
+- **Chat** — text or voice, with hybrid conversation memory and layered crisis
+  safeguards
+- **My Emotions** — per-session emotion analysis (dominant emotion,
+  distribution, timeline)
+- **Resources** — in-app self-help guides & calming exercises (based on the
+  TAR UMT Student Counselling Service collection)
+- **Self-Tests** — PSS-10, Rosenberg self-esteem, PHQ-9, and a Suicide Risk
+  Check (adapted from the SWSPHN screening tool), scored server-side with
+  crisis contacts attached when needed
+- **Staff site** — `/admin` backoffice: live counselling supervision,
+  dashboards, transcript review, model test bench
 
-This edition stores everything in **Supabase** (Postgres + email-verified Auth).
+The fine-tuning research pipeline behind the chatbot lives in its own repo:
+[counseling_chatbot_fine_tuning_pipeline](https://github.com/LimFengZhi/counseling_chatbot_fine_tuning_pipeline)
+(cloned into `fine_tuning_chatbot/` — see its README). The tuned weights are on
+[Hugging Face](https://huggingface.co/Fz0212).
 
 ---
 
-## 1. One-time setup
+## 1. Supabase setup (once per project)
 
-### a. Create the database tables
-Open your Supabase project → **SQL Editor** → **New query**, paste the entire
-contents of [`schema.sql`](schema.sql), and **Run** it. This creates all tables,
-row-level-security policies, and the trigger that auto-creates a profile for
-each new user.
+1. **Create the tables:** Supabase → **SQL Editor** → paste all of
+   [`schema.sql`](schema.sql) → Run.
+2. **Auth:** in **Authentication → Sign In / Providers → Email**, keep
+   **Confirm email** ON. In **Authentication → URL Configuration**, set
+   **Site URL** to where the app runs (`http://localhost:5000` for local dev,
+   your public URL for a deployment).
 
-> ⚠️ `schema.sql` is a **full reset script**: every run **drops all app tables
-> and deletes every user account** (Supabase Auth included), then recreates the
-> schema from scratch. That is the intended workflow for schema changes — but
-> never run it against data you want to keep.
+> ⚠️ `schema.sql` is a **full reset script**: every run drops all app tables
+> **and deletes every auth account**, then recreates the schema. Never run it
+> against data you want to keep. The post-reset checklist is in §6.
 
-### b. Turn on email verification + set the redirect URL
-In Supabase → **Authentication → Sign In / Providers → Email**:
-- Ensure **Confirm email** is **ON** (this is the default).
+---
 
-In **Authentication → URL Configuration**:
-- Set **Site URL** to `http://localhost:5000` so the verification link returns
-  users to the app's login page.
+## 2. Run locally (development)
 
-### c. Configure `.env`
-Copy the template and fill in your Supabase values:
 ```bash
-cp .env.example .env
-```
-The important ones:
-```
-SUPABASE_URL=...            # your project URL
-SUPABASE_SECRET_KEY=...     # service (secret) key (server-side data access)
-SUPABASE_ANON_KEY=          # optional: publishable key for the auth flow
-SITE_URL=http://localhost:5000
-SECRET_KEY=                 # blank = auto-generate; set a fixed value to persist
-AI_MODE=stub               # "stub" (instant) or "real" (loads local models)
-FLASK_DEBUG=0              # 1 enables the Werkzeug debugger — DEV ONLY (RCE risk)
-FLASK_HOST=127.0.0.1      # 0.0.0.0 to expose on your LAN
-```
-> Security notes: the app runs with **debug off** and **bound to localhost** by
-> default. The Supabase **secret key** bypasses RLS — keep `.env` out of version
-> control (it's git-ignored). For anything beyond local dev, set a fixed
-> `SECRET_KEY`, add `SUPABASE_ANON_KEY`, and serve behind gunicorn/waitress.
-
-**Deploying: use ONE worker.**
-```bash
-gunicorn -w 1 -b 0.0.0.0:5000 "app:create_app()"
-```
-Four things live in process memory, so a second worker would silently get its own
-copy of each: the rate limiter's counters (`app/extensions.py`), the staff live-
-counselling claims (`app/admin/live_claims.py`), the crisis-email per-user
-cooldown (`app/email_utils.py`), and the session-analysis report cache
-(`app/admin/routes.py`). With `AI_MODE=real` each worker would also load its own
-multi-GB copy of the model weights. Scaling out means moving all of that to
-shared storage first — not just adding workers.
-
-**Docker (GPU host).** The repo ships a container setup that follows all of the
-above (one gunicorn worker, models in a volume, secrets never in the image):
-```bash
-# on a host with an NVIDIA driver + nvidia-container-toolkit
-cp .env.example .env        # fill in the real secrets
-docker compose up --build
-```
-First boot downloads the weights from Hugging Face (`Fz0212/…`, ~9.5 GB — the
-three study chat models + the **int8 ONNX classifier**, which the app detects by
-the `.onnx` file and loads through `optimum-onnxruntime`) into the `models`
-volume via `scripts/download_models.py`; later boots are instant. The same
-script works outside Docker too — a fresh clone can fetch its weights with
-`python scripts/download_models.py`. Health probe: `http://<host>:5000/health`.
-
-**Optional — crisis email.** Set `crisis_email.enabled: true` in `config.yaml`
-and fill in the SMTP values in `.env`, and every crisis escalation emails the
-counselling information to the user's registered address (at most one email
-per user per hour; wording + cooldown in the same `crisis_email` block). For
-Gmail use `smtp.gmail.com:587` with an **App Password** (Google Account →
-Security → 2-Step Verification → App passwords) — the normal account password
-won't work. Left disabled, nothing is sent and nothing else changes.
-
-### d. Install dependencies
-```bash
-# CPU PyTorch (only needed when AI_MODE=real)
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+cp .env.example .env        # fill in SUPABASE_URL + SUPABASE_SECRET_KEY (min.)
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # AI_MODE=real only
 pip install -r requirements.txt
-```
-
-### e. Upload the Resources content
-The Resources page's guides/exercises are **owned by a script**, not seeded on
-boot:
-```bash
-python scripts/scrape_resources.py --dry-run   # preview
-python scripts/scrape_resources.py             # full-replace upload
-```
-Re-run it whenever you edit the content in that script. (It replaces the whole
-`resources` table each time.)
-
----
-
-## 2. Run it
-```bash
+python scripts/scrape_resources.py    # one-time: upload the Resources content
 python run.py
 ```
-Open <http://localhost:5000>. On first boot the app **auto-seeds** the user
-agreement, the agents' prompts, and the self-tests (missing tests are also
-topped up on later boots — no action needed).
 
-### First use
-1. Go to **Register** and fill in **email, password, name, phone number, date
-   of birth and gender** (all required — you must be at least 13), read the
-   **User Agreement**, tick the box, and sign up.
-2. Check your email and click the verification link.
-3. Come back and **Log in**.
-4. Your details are editable later under **My Profile** in the sidebar. Age is
-   never stored — it's calculated from the date of birth each time it's shown,
-   so it can't go stale.
+Open <http://localhost:5000>. First boot auto-seeds the user agreement, the
+agents' prompts, and the self-tests.
 
-### Resetting the database (full wipe)
-`schema.sql` is a **reset script**: running it drops every app table **and
-deletes every auth account**. After a reset, nothing from before exists —
-including your admin login. Full checklist, in order:
+Key `.env` values (full template: [`.env.example`](.env.example)):
 
-1. Paste the whole of `schema.sql` into the **Supabase SQL editor** and run it.
-2. Restart the app (`python run.py`) — it re-seeds the user agreement, the
-   agent prompts, and the self-tests automatically.
-3. Re-upload the Resources content: `python scripts/scrape_resources.py`.
-4. **Re-create your admin login:** register a fresh account in the app
-   (email + password + name + phone + date of birth + gender), verify the
-   email, then promote it in the Supabase SQL editor:
-   ```sql
-   update public.profiles set role = 'admin' where email = 'you@example.com';
-   ```
-5. Log in as admin via the login page's **"Login as staff →"** link
-   (`/admin/login`). From there, further staff accounts are created in the
-   dashboard — no more SQL needed.
+```
+SUPABASE_URL=...            # project URL
+SUPABASE_SECRET_KEY=...     # service key — bypasses RLS, keep out of git
+SUPABASE_ANON_KEY=          # optional: least-privilege key for the auth flow
+SITE_URL=http://localhost:5000
+AI_MODE=stub                # "stub" (instant, rule-based) or "real" (local models)
+```
+
+Model weights are not in git. Fetch them from Hugging Face into `models/`:
+
+```bash
+python scripts/download_models.py          # ~9.5 GB; idempotent, resumable
+```
+
+**Optional — crisis email:** set `crisis_email.enabled: true` in `config.yaml`
+and fill the SMTP values in `.env` (Gmail needs an App Password). Every crisis
+escalation then emails the counselling info to the user, max once per hour.
 
 ---
 
-## 3. How the AI is wired (`AI_MODE`)
+## 3. Deploy with Docker (GPU host)
+
+The repo ships a complete container setup: one gunicorn worker, weights in a
+volume, secrets never in the image.
+
+**Host prerequisites (once):** NVIDIA driver, Docker + compose plugin,
+[nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+(`sudo nvidia-ctk runtime configure && sudo systemctl restart docker`).
+
+```bash
+git clone https://github.com/LimFengZhi/MindMateServerV1.git
+cd MindMateServerV1
+cp .env.example .env        # fill in the real secrets; set SITE_URL to the public URL
+docker compose up --build -d
+docker compose logs -f      # watch the first boot
+```
+
+First boot downloads the weights from Hugging Face into the `models` volume
+(~9.5 GB: the three study chat models + the int8 ONNX classifier, auto-detected
+and loaded through `optimum-onnxruntime`); the summariser and whisper caches
+land in the same volume. Later boots are instant.
+
+- **Verify:** `curl http://localhost:5000/health` →
+  `{"models": {"chatbot": true, "classifier": true, ...}}`
+- **Update:** `git pull && docker compose up --build -d` (weights persist)
+- **Supabase side:** set the project's Auth **Site URL** to the deployment's
+  public URL (same value as `SITE_URL` in `.env`)
+- **HTTPS:** put a reverse proxy or a Cloudflare tunnel in front — don't expose
+  the bare port to the internet
+
+**Why one worker?** The rate limiter, live-counselling claims, crisis-email
+cooldown and report cache are all in process memory — a second worker would get
+its own copies (and its own multi-GB model load). The compose file and
+`docker/entrypoint.sh` already enforce this; scaling out means moving that state
+to shared storage first.
+
+---
+
+## 4. AI modes (`AI_MODE`)
 
 | Mode | Behaviour |
 |------|-----------|
-| `stub` (default) | Lightweight rule-based agents. Boots instantly, no model downloads. The full LangGraph pipeline (diagnose → route → summarise → generate) still runs, and **crisis escalation still works** (lexical safety net). |
-| `real` | Loads the local models in `models/` (Gemma2 chatbot, RoBERTa emotion classifier) and Qwen summariser. If any model fails to load, that component **falls back to its stub** automatically — the app keeps running. |
+| `stub` (default) | Rule-based agents, instant boot, no downloads. The full pipeline still runs and **crisis escalation still works** (lexical safety net). |
+| `real` | Loads the local models from `models/`. Any model that fails to load **falls back to its stub** — the app keeps running. |
 
-Voice (speech-to-text) uses **faster-whisper** and works in either mode once the
-package is installed. Without it, the mic button reports "voice unavailable".
-It is loaded at **startup in both modes** — so `stub` boot pays for the whisper
-model (a few seconds; `WHISPER_MODEL=tiny` in `.env` makes it quicker) but the
-first voice message doesn't stall on a cold load.
-
-Check what's loaded at any time: <http://localhost:5000/health>.
+Voice (faster-whisper) works in either mode and is loaded at startup, so the
+first voice message doesn't stall (`WHISPER_MODEL=tiny` in `.env` speeds up
+boot). Check what's loaded: <http://localhost:5000/health>.
 
 ---
 
-## 4. Roles & the staff site (user / staff / admin)
+## 5. Roles & the staff site
 
-Every user gets the `user` role automatically (via the `profiles` table).
+Every registered account gets the `user` role. Staff enter via the login page's
+**"Login as staff →"** link (`/admin/login`).
 
-- **staff** — the full backoffice at `/admin`:
-  - **Live Counselling** (`/admin/live`) — supervision of **experiment mode**:
-    users can start a chat in experiment mode, and every bot reply (crisis
-    responses included) is held as a draft until a counsellor resolves it. The
-    counsellor **takes charge of up to two users** (those needing attention are
-    flagged and sorted first), picks one of each user's live sessions, watches
-    the conversation live side by side, and **approves** the draft or **edits**
-    it (the edit is delivered; the bot's draft is recorded as rejected). The counsellor can also
-    rename the session as a case label. Meanwhile the user's chat shows "being
-    reviewed by a counsellor…" and polls until delivery.
-  - **Dashboard** — usage stats (users, sessions, messages, escalations, pending
-    reviews, tests taken) + 14-day usage/escalation charts
-  - **Suicide Alert** — crisis escalations for **today / this week / this
-    month**: totals, the affected users ranked highest-first (with phone), and
-    whether each completed the **Suicide Risk Check** quiz in that window
-  - **Emotion Analysis** — emotion distribution + escalations across all users
-  - **User Sessions** — every registered user with their info (name, email,
-    age, gender, phone, joined date, chat counts); open a user → pick a chat → review the
-    transcript with per-reply diagnostics; **rate each bot reply (1–5 ★),
-    leave feedback**, **export the session as JSON**, or click **📄 Report** to
-    generate a **session-analysis report** of the user's recent chats (written
-    by the summarizer model with the admin-editable `session_analysis` prompt),
-    view it, and **download it as PDF**
-  - **Test Chat** — three testing types, all ratable (1–5 + feedback):
-    *Normal (chat as a user)* — the multi-agent test bench
-    (`/admin/testing/multi-agent`) chatting through the real pipeline on the
-    staff member's own account; *Single vs Multi-agent* — the same Gemma 2
-    weights answering alone vs through the full pipeline; *Three Models* — the
-    same message answered by Gemma 2, Llama 3.2 and Qwen3 (the two extra
-    models lazy-load on first run). Comparison runs live in renamable/
-    deletable bench sessions; ratings are stored in the `bench_session` /
-    `bench_result` tables (part of `schema.sql`)
-- **admin** — everything staff can, plus **create/remove staff accounts by
-  email** from the dashboard.
+- **staff** — the `/admin` backoffice:
+  - **Live Counselling** — supervises **experiment mode** chats: every bot
+    reply is held as a draft until a counsellor approves or edits it (the user
+    sees "being reviewed…" until delivery). A counsellor takes charge of up to
+    two users at a time.
+  - **Dashboard / Suicide Alert / Emotion Analysis** — usage stats, 14-day
+    charts, crisis escalations for today/week/month with quiz-uptake per user
+  - **User Sessions** — every user with profile info and chat counts →
+    transcript review with per-reply ratings & feedback, JSON export, and a
+    generated **session-analysis report** (viewable + PDF download)
+  - **Editing** — CRUD for Resources, the agents' **Prompts** (live in ~15 s,
+    no restart), Agreements and Self-Tests, plus test analytics
+  - **Test Chat** — chat through the real pipeline, compare **single vs
+    multi-agent**, or run the same message through all **three study models**;
+    every reply ratable, stored in bench sessions
+- **admin** — everything above, plus creating/removing staff accounts by email.
 
-**Staff entrance:** the login page has a **"Login as staff →"** link that leads
-to `/admin/login`. Non-staff accounts are rejected there.
+**Bootstrap the first admin** (once, in the Supabase SQL editor):
 
-**Bootstrap the first admin** (one-time, in the Supabase SQL editor):
 ```sql
 update public.profiles set role = 'admin' where email = 'person@example.com';
 ```
-After that, no SQL is needed — admins manage staff entirely from the dashboard.
-Server-side guards (`staff_required` / `admin_required`) re-check the role on
-every request, so demotions take effect immediately.
 
-### Demo admin account
-For trying out the staff site on the development database:
+After that, staff management happens entirely in the dashboard. Role guards
+re-check on every request, so demotions apply immediately.
 
-| | |
-|---|---|
-| **Email** | `admin@mindmate.com` |
-| **Password** | `Admin123!` |
-
-Log in via **"Login as staff →"** on the login page (or `/admin/login`).
-
-> ⚠️ This is a **demo credential for local development only**. Anyone who reads
-> this file can sign into that account, so change the password (Supabase →
-> Authentication → Users) or delete the account before the app faces real
-> users or real data.
-
-> ♻️ Rerunning `schema.sql` **deletes this account** along with everything
-> else. Recreate it afterwards: register any account in the app, promote it
-> with the SQL at the bottom of `schema.sql`, or re-create this demo login
-> from the admin dashboard of another admin account.
+**Demo admin (local development only):** `admin@mindmate.com` / `Admin123!` —
+anyone reading this file can use it, so change or delete it before facing real
+users. A schema reset deletes it too.
 
 ---
 
-## 5. Project layout
+## 6. Resetting the database
 
-The application code lives in the `app/` package. Setup files and the model
-weights stay at the project root.
+Running `schema.sql` again wipes everything (§1 warning). Afterwards, in order:
+
+1. Restart the app — it re-seeds the agreement, prompts, and self-tests.
+2. `python scripts/scrape_resources.py` — restore the Resources content.
+   (⚠️ this also overwrites any edits made in the admin Resources editor)
+3. Register a fresh account, then promote it to admin with the SQL in §5.
+
+---
+
+## 7. Project layout
 
 ```
-MultiAgent2/
-├─ run.py                 dev entrypoint  (FLASK_DEBUG / FLASK_HOST aware)
-├─ schema.sql             Supabase DB setup — run in the SQL editor (idempotent)
+MindMateServerV1/
+├─ run.py                 dev entrypoint
+├─ schema.sql             Supabase DB setup (full reset — run in the SQL editor)
 ├─ requirements.txt       dependencies
-├─ README.md  API.md  CLAUDE.md  CODING_GUIDE.md  .env  .gitignore
+├─ README.md  API.md  CLAUDE.md  CODING_GUIDE.md
+├─ config.yaml            committed app tuning (generation, memory, thresholds)
+├─ Dockerfile / docker-compose.yml / docker/entrypoint.sh   container deployment
 ├─ scripts/
+│  ├─ download_models.py  fetch the model weights from Hugging Face
 │  └─ scrape_resources.py owns the Resources content (full-replace upload)
-├─ models/                ML model weights (loaded only when AI_MODE=real)
-└─ app/                   the Flask application package
+├─ models/                weights (gitignored; volume-mounted in Docker)
+├─ fine_tuning_chatbot/   SEPARATE repo cloned here (research pipeline)
+└─ app/
    ├─ __init__.py           app factory (create_app)
-   ├─ config.py             env-driven configuration
-   ├─ extensions.py         Supabase client + optional rate limiter
-   ├─ http_utils.py         json_error helper (uniform error bodies)
-   ├─ auth/                 Supabase email-verified auth + route guards
-   ├─ db/                   repo.py (user queries) · admin_repo.py (admin queries)
-   │                        · seed.py (boot seeding)
-   ├─ agents/               the chat pipeline — LangChain components +
-   │                        LangGraph control flow: state, guards, stubs,
-   │                        chat_models (LocalChatModel), prompts, chains
-   │                        (prompt|llm|parser + retry/fallback policies),
-   │                        nodes, graph (answer entry point), voice,
-   │                        registry (model loading), prompt_loader +
-   │                        prompt/ (DB-backed system prompts, .txt seed)
-   ├─ chat/                 chat/voice HTTP routes (invoke the graph)
-   ├─ sessions/             session CRUD + transcript + emotion analysis
-   ├─ resources/            resources API + self_test/ (definitions, scoring)
-   ├─ agreements/           active user-agreement API
-   ├─ admin/                staff site: routes + account service
-   ├─ templates/            Jinja: base.html → app_base.html → pages
-   │                        · partials/sidebar.html · admin/ (staff pages)
-   └─ static/               css/ (style.css + admin.css) · js/ (per page + admin/)
+   ├─ config.py             the single reader of .env + config.yaml
+   ├─ extensions.py         Supabase client + rate limiter
+   ├─ auth/                 email-verified auth + route guards
+   ├─ db/                   repo.py (user queries) · admin_repo.py (admin) · seed.py
+   ├─ agents/               the pipeline: LangChain chains + LangGraph graph,
+   │                        guards, stubs, registry, DB-backed prompts
+   ├─ chat/ sessions/ resources/ agreements/   user-facing APIs
+   ├─ admin/                staff site routes + account service
+   └─ templates/ static/    Jinja pages + vanilla JS/CSS
 ```
 
-### Database tables
-`profiles`, `agreements`, `agreement_acceptances`, `prompts`, `sessions`,
-`messages`, `resources`, `resource_steps`, `test`, `test_created`.
+**Database tables:** `profiles`, `agreements`, `agreement_acceptances`,
+`prompts`, `sessions`, `messages`, `resources`, `resource_steps`, `test`,
+`test_created`, `bench_session`, `bench_result`.
 
-### Editing the agents' prompts
-The chatbot/summarizer system prompts live in the **`prompts`** table (seeded on
-first boot from `app/agents/prompt/*.txt`). Edit them in the Supabase
-dashboard (Table editor → `prompts` → edit the `content` of `composed` /
-`summarise`); changes take effect within ~15 seconds, no restart needed. If the
-table is empty or unreachable, the app falls back to the bundled `.txt` files.
+**Editing the agents' prompts:** use the admin dashboard's **Editing → Prompts**
+tab — changes apply within ~15 s, no restart. If the `prompts` table is empty or
+unreachable, the app falls back to the bundled `app/agents/prompt/*.txt` files.
 
-### Message feedback (staff review)
-The `messages` table's `rating` (1–5), `feedback` (text), `feedback_by`, and
-`feedback_at` columns are written by the **staff site's review tools** (User
-Sessions and the Testing bench): staff rate bot replies and leave feedback via
-`POST /api/admin/messages/{id}/feedback`, and session exports include them —
-a ready-made quality dataset for future fine-tuning.
-
-> ⚠️ Re-running `schema.sql` **wipes the database and all user accounts**, then
-> recreates the schema. After every reset: (1) `python run.py` re-seeds the
-> agreement, prompts, and self-tests; (2) rerun
-> `python scripts/scrape_resources.py` to restore the Resources content;
-> (3) register your admin account again and re-promote it with the SQL at the
-> bottom of `schema.sql` (the demo admin above is deleted too).
-
-### Where to edit what
-See [`CODING_GUIDE.md`](CODING_GUIDE.md) for the user-side / admin-side split —
-which files admin work may touch and which are off-limits.
+**Where to edit what:** see [`CODING_GUIDE.md`](CODING_GUIDE.md) for the
+user-side / admin-side split.
