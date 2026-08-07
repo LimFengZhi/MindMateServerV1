@@ -14,7 +14,7 @@ import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from flask import Blueprint, Response, render_template, request, jsonify, g
+from flask import Blueprint, Response, render_template, request, jsonify, g, current_app
 
 from app.admin import live_claims
 from app.admin.service import create_staff_account
@@ -603,7 +603,20 @@ def bench_run():
             return json_error("this comparison chat uses a different mode", 400)
         histories = get_bench_histories(session_id)
 
-    results = run_bench(mode, message, histories)
+    # Same dispatch as the chat routes: with INFERENCING_CLIENT=runpod the
+    # comparison generates on the serverless worker (which has all three
+    # study models baked in); persistence below stays local either way.
+    from app.config import Config
+    if Config.INFERENCING_CLIENT == "runpod":
+        from app.agents.runpod_client import RunpodError, runpod_bench
+        try:
+            results = runpod_bench(mode, message, histories)
+        except RunpodError as e:
+            current_app.logger.warning("RunPod bench failed: %s", e)
+            return json_error("the AI service is unavailable right now — "
+                              "please try again in a moment", 503)
+    else:
+        results = run_bench(mode, message, histories)
     run_id = str(uuid4())
     persisted, note, title = True, None, None
     try:

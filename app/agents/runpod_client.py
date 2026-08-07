@@ -1,14 +1,17 @@
 """RunPod serverless inference client.
 
-With INFERENCING_CLIENT=runpod (.env) the chat routes send each turn to a
-RunPod serverless endpoint instead of running answer() in-process. The worker
-(scripts/runpod_handler.py) runs the SAME pipeline against the SAME Supabase
-project, so persistence, crisis handling, and the response shape are identical
-to local mode — the Flask app just doesn't need the model weights.
+With INFERENCING_CLIENT=runpod (.env) the app sends model work to a RunPod
+serverless endpoint instead of running it in-process. The worker
+(scripts/runpod_handler.py) runs the SAME code against the SAME Supabase
+project, so behavior and response shapes are identical to local mode — the
+Flask machine just doesn't need the model weights.
 
 Job contract (both sides of it live in this repo):
-    input  = {"user_id", "session_id", "message", "mode"}
-    output = answer()'s payload dict, or {"error": "session_deleted"}
+    chat  input  = {"action": "chat", "user_id", "session_id", "message", "mode"}
+          output = answer()'s payload dict, or {"error": "session_deleted"}
+    bench input  = {"action": "bench", "mode", "message", "histories"}
+          output = {"results": run_bench()'s list}
+    Any output may instead be {"error": "<detail>"}.
 """
 import time
 
@@ -31,21 +34,18 @@ def _headers():
     return {"Authorization": f"Bearer {Config.RUNPOD_API_KEY}"}
 
 
-def runpod_answer(user_id, session_id, message, mode="multi"):
-    """One chat turn via the serverless endpoint. Same signature and return
-    value as answer(); raises SessionDeleted / RunpodError."""
+def _run_job(job_input):
+    """Submit one job and return its output dict (raises RunpodError)."""
     if not (Config.RUNPOD_ENDPOINT_ID and Config.RUNPOD_API_KEY):
         raise RunpodError("RUNPOD_ENDPOINT_ID / RUNPOD_API_KEY not set in .env")
 
     base = f"{_API}/{Config.RUNPOD_ENDPOINT_ID}"
-    body = {"input": {"user_id": user_id, "session_id": session_id,
-                      "message": message, "mode": mode}}
     deadline = time.monotonic() + Config.RUNPOD_TIMEOUT_S
     try:
         # /runsync returns early (~90 s server-side cap) on a cold start, so
         # keep polling /status until the job finishes or our deadline passes.
-        r = requests.post(f"{base}/runsync", json=body, headers=_headers(),
-                          timeout=120)
+        r = requests.post(f"{base}/runsync", json={"input": job_input},
+                          headers=_headers(), timeout=120)
         r.raise_for_status()
         job = r.json()
         while job.get("status") not in _TERMINAL:
@@ -68,8 +68,32 @@ def runpod_answer(user_id, session_id, message, mode="multi"):
             f"job ended {job.get('status')}: {job.get('error') or 'no detail'}")
 
     output = job.get("output")
-    if isinstance(output, dict) and output.get("error") == "session_deleted":
-        raise SessionDeleted(session_id)
     if not isinstance(output, dict):
         raise RunpodError(f"unexpected job output: {output!r}")
     return output
+
+
+def runpod_answer(user_id, session_id, message, mode="multi"):
+    """One chat turn via the serverless endpoint. Same signature and return
+    value as answer(); raises SessionDeleted / RunpodError."""
+    output = _run_job({"action": "chat", "user_id": user_id,
+                       "session_id": session_id, "message": message,
+                       "mode": mode})
+    if output.get("error") == "session_deleted":
+        raise SessionDeleted(session_id)
+    if output.get("error"):
+        raise RunpodError(f"worker error: {output['error']}")
+    return output
+
+
+def runpod_bench(mode, message, histories=None):
+    """One Test Chat comparison turn ('models3' / 'single_vs_multi') via the
+    serverless endpoint. Same return value as bench.run_bench()."""
+    output = _run_job({"action": "bench", "mode": mode, "message": message,
+                       "histories": histories or {}})
+    if output.get("error"):
+        raise RunpodError(f"worker error: {output['error']}")
+    results = output.get("results")
+    if not isinstance(results, list):
+        raise RunpodError(f"unexpected bench output: {output!r}")
+    return results

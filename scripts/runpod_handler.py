@@ -28,8 +28,21 @@ from app.db.repo import SessionDeleted  # noqa: E402
 registry.load_all()
 
 
-def handler(event):
-    inp = (event or {}).get("input") or {}
+def _bench(inp):
+    """One Test Chat comparison turn. Pure compute: histories come in from the
+    Flask side (bench_session tables) and the results go back for it to
+    persist — the worker itself never touches the bench tables."""
+    from app.agents.bench import BENCH_MODES, run_bench
+    missing = [k for k in ("mode", "message") if not inp.get(k)]
+    if missing:
+        return {"error": "missing input fields: " + ", ".join(missing)}
+    if inp["mode"] not in BENCH_MODES:
+        return {"error": f"unknown bench mode: {inp['mode']}"}
+    return {"results": run_bench(inp["mode"], inp["message"],
+                                 inp.get("histories") or {})}
+
+
+def _chat(inp):
     missing = [k for k in ("user_id", "session_id", "message")
                if not inp.get(k)]
     if missing:
@@ -40,6 +53,13 @@ def handler(event):
     except SessionDeleted:
         # The client maps this back to the same 404 as local mode.
         return {"error": "session_deleted"}
+
+
+def handler(event):
+    inp = (event or {}).get("input") or {}
+    if (inp.get("action") or "chat") == "bench":
+        return _bench(inp)
+    return _chat(inp)
 
 
 runpod.serverless.start({"handler": handler})

@@ -18,3 +18,4 @@ checkpoints/
 *.bin
 .ipynb_checkpoints/
 .vscode/
+test_input.json

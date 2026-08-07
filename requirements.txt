@@ -42,3 +42,6 @@ faster-whisper>=1.0
 
 # --- Production WSGI server ---
 gunicorn>=22.0
+
+
+runpod

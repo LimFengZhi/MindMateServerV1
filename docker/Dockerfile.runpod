@@ -1,0 +1,85 @@
+# MindMate — RunPod SERVERLESS worker image, ALL WEIGHTS BAKED IN.
+#
+# This is the GPU half of INFERENCING_CLIENT=runpod: the worker runs
+# scripts/runpod_handler.py (the same answer() pipeline, same Supabase
+# project), while the Flask app runs anywhere weights-free and just relays.
+#
+# Every model ships inside the image — all THREE study chat models (qwen3
+# serves the app; gemma2 + llama32 power the Test Chat 'models3' comparison,
+# forwarded here by the admin bench route), classifier, summarizer, and
+# whisper — so a cold-started worker loads straight from disk: no network
+# volume, no Hugging Face downloads at runtime. The image is large (~23 GB);
+# the model layers sit BEFORE the app code, so code-only rebuilds reuse them
+# from cache and only the small final layers change.
+#
+# Build & push (from the REPO ROOT — the build context must be the root):
+#   docker build -f docker/Dockerfile.runpod -t notata/notata:health-latest .
+#   docker push notata/notata:health-latest
+#
+# RunPod console -> Serverless -> New Endpoint:
+#   - Container image: notata/notata:health-latest
+#   - GPU: a 16 GB class card is plenty. Peak VRAM = chatbot + summarizer +
+#     ONE bench extra (the bench loads gemma2/llama32 one at a time and frees
+#     each straight after); the int8 ONNX classifier runs on CPU.
+#   - Environment variables (secrets are NEVER in the image):
+#       SUPABASE_URL, SUPABASE_SECRET_KEY            (required)
+#       SMTP_USER, SMTP_PASSWORD                     (only if crisis email is on)
+#     Do NOT override the model-path envs on the endpoint — they point at the
+#     baked weights; changing them would trigger a runtime download again.
+#
+# Then point the Flask app's .env at the endpoint:
+#   INFERENCING_CLIENT=runpod
+#   RUNPOD_ENDPOINT_ID=<endpoint id>
+#   RUNPOD_API_KEY=<api key>
+#
+# Same base as the main Dockerfile: python-slim + the cu128 torch wheel
+# (bundles the CUDA runtime; RunPod's host provides the driver).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# torch first (biggest layer, changes least), then the app deps
+# (requirements.txt includes the `runpod` SDK).
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# HF_HOME before the bake steps so the summarizer/whisper snapshots below land
+# in the same cache the app reads at runtime. HF_HUB_DISABLE_XET forces the
+# regular CDN download path — the xet backend repeatedly 500s mid-download
+# (us.aws.cdn.hf.co) and kills the build.
+ENV HF_HOME=/app/models/.hf_cache \
+    HF_HUB_DISABLE_XET=1
+
+# ---- Bake the weights (needs only scripts/, so app-code edits don't bust
+# ---- these ~13 GB of layer cache) -------------------------------------------
+COPY scripts/download_models.py ./scripts/download_models.py
+# ALL THREE study chat models (qwen3 serves the app; gemma2 + llama32 are the
+# Test Chat bench's 'models3' extras, lazy-loaded one at a time per run) +
+# the int8 ONNX classifier -> /app/models/...
+RUN python scripts/download_models.py
+# Summarizer + faster-whisper "small" -> the HF cache (HF_HOME above).
+RUN python - <<'EOF'
+from huggingface_hub import snapshot_download
+snapshot_download("Qwen/Qwen2.5-1.5B-Instruct")
+snapshot_download("Systran/faster-whisper-small")
+EOF
+
+# ---- The app (small, changes often — keep last) -----------------------------
+# .dockerignore keeps data/, the study, and .env out of the context.
+COPY app ./app
+COPY scripts ./scripts
+COPY config.yaml ./
+
+# Non-secret defaults, matched to the weights baked above.
+ENV AI_MODE=real \
+    CLASSIFIER_PATH=models/classifier_models/roberta_onnx_int8 \
+    CHAT_MODEL_PATH=models/chat_models/mentalchat16k/qwen3_merged \
+    CHAT_MODEL_FAMILY=qwen3 \
+    SUMMARIZER_PATH=Qwen/Qwen2.5-1.5B-Instruct \
+    WHISPER_MODEL=small \
+    PYTHONUNBUFFERED=1
+
+COPY docker/entrypoint-runpod.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
