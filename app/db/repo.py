@@ -45,6 +45,16 @@ def _none_if_bad_uuid(exc):
     raise exc
 
 
+def _execute_or_none(query):
+    """Run one lookup whose id comes from the URL: returns the response, or
+    None when the id was a malformed UUID. Any other APIError still raises
+    (see _none_if_bad_uuid). Shared by every by-id read below."""
+    try:
+        return query.execute()
+    except APIError as e:
+        return _none_if_bad_uuid(e)
+
+
 # ---------------------------------------------------------------------------
 # Profiles / roles
 # ---------------------------------------------------------------------------
@@ -111,15 +121,13 @@ def list_sessions(user_id):
 
 def get_session(user_id, session_id):
     """Owner-scoped read: returns the session only if it belongs to user_id."""
-    try:
-        res = (get_sb().table("sessions")
-               .select("*")
-               .eq("id", session_id)
-               .eq("user_id", user_id)
-               .limit(1)
-               .execute())
-    except APIError as e:
-        return _none_if_bad_uuid(e)
+    res = _execute_or_none(get_sb().table("sessions")
+                           .select("*")
+                           .eq("id", session_id)
+                           .eq("user_id", user_id)
+                           .limit(1))
+    if res is None:
+        return None
     return res.data[0] if res.data else None
 
 
@@ -193,13 +201,11 @@ def set_message_feedback(message_id, rating=None, feedback=None, feedback_by=Non
         update["rating"] = rating
     if feedback is not None:
         update["feedback"] = feedback
-    try:
-        res = (get_sb().table("messages")
-               .update(update)
-               .eq("id", message_id)
-               .execute())
-    except APIError as e:
-        return _none_if_bad_uuid(e)  # malformed message id -> not found
+    res = _execute_or_none(get_sb().table("messages")   # bad id -> not found
+                           .update(update)
+                           .eq("id", message_id))
+    if res is None:
+        return None
     return res.data[0] if res.data else None
 
 
@@ -236,11 +242,12 @@ def _public_status(db_status):
 def _reply_extras(row):
     """Turn metadata shared by transcript + pending payloads: the suggested
     Suicide Risk Check link is derived from the persisted escalated column,
-    so it survives reloads identically to the live reply."""
-    from app.agents.guards import needs_risk_check, RISK_CHECK_SLUG
-    if needs_risk_check(bool(row.get("escalated"))):
-        return {"suggestedTest": RISK_CHECK_SLUG}
-    return {}
+    so it survives reloads identically to the live reply — same guards helper
+    the live payload uses. The import stays function-local: app.agents pulls
+    in repo.py during its own init, so hoisting it would tie this module to
+    that import order."""
+    from app.agents.guards import reply_extras
+    return reply_extras(bool(row.get("escalated")))
 
 
 def get_transcript(user_id, session_id):
@@ -332,18 +339,28 @@ def list_resources():
     return res.data or []
 
 
+def _looks_like_uuid(value):
+    parts = str(value).split("-")
+    return len(parts) == 5 and len(str(value).replace("-", "")) == 32
+
+
+def _get_published_by_id_or_slug(table, ident):
+    """One published row, addressed by either a UUID id or a human-friendly
+    slug — the shared shape behind get_resource/get_test. None if not found
+    or the id was malformed."""
+    q = get_sb().table(table).select("*").eq("is_published", True).limit(1)
+    key = "id" if _looks_like_uuid(ident) else "slug"
+    res = _execute_or_none(q.eq(key, ident))
+    if res is None or not res.data:
+        return None
+    return res.data[0]
+
+
 def get_resource(resource_id):
     """Fetch one resource (by id or slug) plus its ordered steps."""
-    q = get_sb().table("resources").select("*").eq("is_published", True).limit(1)
-    # Accept either a UUID id or a human-friendly slug.
-    key = "slug" if not _looks_like_uuid(resource_id) else "id"
-    try:
-        res = q.eq(key, resource_id).execute()
-    except APIError as e:
-        return _none_if_bad_uuid(e)
-    if not res.data:
+    resource = _get_published_by_id_or_slug("resources", resource_id)
+    if resource is None:
         return None
-    resource = res.data[0]
     steps = (get_sb().table("resource_steps")
              .select("step_order, title, content")
              .eq("resource_id", resource["id"])
@@ -351,11 +368,6 @@ def get_resource(resource_id):
              .execute())
     resource["steps"] = steps.data or []
     return resource
-
-
-def _looks_like_uuid(value):
-    parts = str(value).split("-")
-    return len(parts) == 5 and len(str(value).replace("-", "")) == 32
 
 
 # ---------------------------------------------------------------------------
@@ -372,13 +384,7 @@ def list_tests():
 
 def get_test(test_id):
     """Fetch one test by id or slug."""
-    q = get_sb().table("test").select("*").eq("is_published", True).limit(1)
-    key = "slug" if not _looks_like_uuid(test_id) else "id"
-    try:
-        res = q.eq(key, test_id).execute()
-    except APIError as e:
-        return _none_if_bad_uuid(e)
-    return res.data[0] if res.data else None
+    return _get_published_by_id_or_slug("test", test_id)
 
 
 def save_test_result(user_id, test_id, answers, score, band):

@@ -19,7 +19,9 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
 from app.agents import stubs
 from app.agents.chat_models import LocalChatModel
-from app.agents.guards import CASE_NOTES_FALLBACK, is_bad_generation, tidy_reply
+from app.agents.guards import (
+    CASE_NOTES_FALLBACK, is_bad_generation, require_nonempty, tidy_reply,
+)
 from app.agents.prompts import (
     REPLY_PROMPT, SUMMARISE_PROMPT, format_history, pairs_to_messages,
 )
@@ -112,15 +114,6 @@ reply_chain = _reply_generation.with_fallbacks([RunnableLambda(stubs.generate)])
 # Long-term-memory summary
 #   input: {history: [(user, reply)]}  (the turns OUTSIDE the verbatim window)
 # ---------------------------------------------------------------------------
-def _require_text(text):
-    """An empty generation isn't an exception — make it one, so the stub
-    fallback fires and the summary is never blank (a blank summary would make
-    build_composed_system mislabel an ongoing chat as 'No prior conversation')."""
-    if not text.strip():
-        raise ValueError("empty summary")
-    return text.strip()
-
-
 summarize_chain = (
     RunnablePassthrough.assign(
         system_text=lambda x: build_summarise_system(),
@@ -129,12 +122,12 @@ summarize_chain = (
     | SUMMARISE_PROMPT
     | summarizer
     | StrOutputParser()
-    | RunnableLambda(_require_text)
+    | RunnableLambda(lambda t: require_nonempty(t, "summary"))
 ).with_fallbacks([RunnableLambda(lambda x: stubs.summarize(x["history"]))])
 
 
 # ---------------------------------------------------------------------------
-# Diagnostic — RoBERTa classifier (not an LLM, so a plain runnable)
+# Diagnostic — RoBERTa classifier
 #   input: str (the user message) -> Diagnostic dict
 # ---------------------------------------------------------------------------
 def _diagnose_real(text):

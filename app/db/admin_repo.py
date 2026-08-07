@@ -24,10 +24,12 @@ def _retry_once(call):
 
 
 def _count(table, **filters):
-    q = get_sb().table(table).select("id", count="exact").limit(1)
-    for column, value in filters.items():
-        q = q.eq(column, value)
-    return q.execute().count or 0
+    def call():
+        q = get_sb().table(table).select("id", count="exact").limit(1)
+        for column, value in filters.items():
+            q = q.eq(column, value)
+        return q.execute()
+    return _retry_once(call).count or 0
 
 
 def get_stats():
@@ -48,9 +50,9 @@ def get_stats():
 # ---------------------------------------------------------------------------
 def get_emotion_overview():
     """Emotion distribution + escalation count over every message."""
-    rows = (get_sb().table("messages")
-            .select("emotion, escalated")
-            .execute()).data or []
+    rows = (_retry_once(lambda: get_sb().table("messages")
+                        .select("emotion, escalated")
+                        .execute())).data or []
     counts = {}
     escalations = 0
     for r in rows:
@@ -75,14 +77,14 @@ def _emails_by_user():
 def list_all_sessions():
     """Every user's sessions, newest first, with owner email, message count,
     and how many replies already carry staff feedback (rating or text)."""
-    sessions = (get_sb().table("sessions")
-                .select("id, user_id, title, created_at")
-                .order("created_at", desc=True)
-                .execute()).data or []
+    sessions = (_retry_once(lambda: get_sb().table("sessions")
+                            .select("id, user_id, title, created_at")
+                            .order("created_at", desc=True)
+                            .execute())).data or []
     emails = _emails_by_user()
-    msgs = (get_sb().table("messages")
-            .select("session_id, rating, feedback")
-            .execute()).data or []
+    msgs = (_retry_once(lambda: get_sb().table("messages")
+                        .select("session_id, rating, feedback")
+                        .execute())).data or []
     counts, reviewed = {}, {}
     for m in msgs:
         sid = m["session_id"]
@@ -247,20 +249,20 @@ def resolve_pending_message(message_id, reviewer_id, edited_reply=None):
 # Staff-account management (admin only)
 # ---------------------------------------------------------------------------
 def list_staff_accounts():
-    res = (get_sb().table("profiles")
-           .select("id, email, role, created_at")
-           .in_("role", ["staff", "admin"])
-           .order("created_at", desc=False)
-           .execute())
+    res = _retry_once(lambda: get_sb().table("profiles")
+                      .select("id, email, role, created_at")
+                      .in_("role", ["staff", "admin"])
+                      .order("created_at", desc=False)
+                      .execute())
     return res.data or []
 
 
 def get_profile_by_email(email):
-    res = (get_sb().table("profiles")
-           .select("*")
-           .eq("email", email)
-           .limit(1)
-           .execute())
+    res = _retry_once(lambda: get_sb().table("profiles")
+                      .select("*")
+                      .eq("email", email)
+                      .limit(1)
+                      .execute())
     return res.data[0] if res.data else None
 
 
@@ -282,10 +284,10 @@ def _attempt(write):
 
 
 def list_all_resources():
-    res = (get_sb().table("resources")
-           .select("*")
-           .order("sort_order", desc=False)
-           .execute())
+    res = _retry_once(lambda: get_sb().table("resources")
+                      .select("*")
+                      .order("sort_order", desc=False)
+                      .execute())
     return res.data or []
 
 
@@ -306,7 +308,8 @@ def delete_resource(resource_id):
 # Prompts are keyed by their `key` column (the editor passes keys as ids) —
 # the same identifier the app's prompt loader resolves ('composed', 'summarise').
 def list_prompts():
-    return (get_sb().table("prompts").select("*").execute()).data or []
+    return (_retry_once(lambda: get_sb().table("prompts")
+                        .select("*").execute())).data or []
 
 
 def create_prompt(name, content):
@@ -332,7 +335,8 @@ def delete_prompt(name):
 
 
 def list_agreements():
-    return (get_sb().table("agreements").select("*").execute()).data or []
+    return (_retry_once(lambda: get_sb().table("agreements")
+                        .select("*").execute())).data or []
 
 
 def update_agreement(agreement_id, content):
@@ -341,7 +345,8 @@ def update_agreement(agreement_id, content):
 
 
 def list_tests():
-    return (get_sb().table("test").select("*").execute()).data or []
+    return (_retry_once(lambda: get_sb().table("test")
+                        .select("*").execute())).data or []
 
 
 def create_test(data):
@@ -403,10 +408,10 @@ def list_bench_sessions(staff_id):
 
 def get_bench_session(staff_id, session_id):
     try:
-        res = (get_sb().table("bench_session")
-               .select("id, mode, title, created_at")
-               .eq("id", session_id).eq("staff_id", staff_id)
-               .limit(1).execute())
+        res = _retry_once(lambda: get_sb().table("bench_session")
+                          .select("id, mode, title, created_at")
+                          .eq("id", session_id).eq("staff_id", staff_id)
+                          .limit(1).execute())
     except APIError as e:
         _raise_if_bench_missing(e)
         return _none_if_bad_uuid(e)
@@ -575,9 +580,9 @@ def get_test_attempts(test_id, limit=200):
     against the test's current questions — if staff edited the test after an
     attempt, unresolvable picks are labelled instead of guessed)."""
     try:
-        test_res = (get_sb().table("test")
-                    .select("id, title, questions")
-                    .eq("id", test_id).limit(1).execute())
+        test_res = _retry_once(lambda: get_sb().table("test")
+                               .select("id, title, questions")
+                               .eq("id", test_id).limit(1).execute())
     except APIError as e:
         return _none_if_bad_uuid(e)
     if not test_res.data:

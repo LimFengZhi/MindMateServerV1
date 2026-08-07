@@ -17,6 +17,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
 from app.agents.chat_models import LocalChatModel
+from app.agents.guards import require_nonempty
 from app.agents.prompt_loader import build_session_analysis_system
 from app.config import Config
 from app.db.admin_repo import get_user_report_data
@@ -35,12 +36,6 @@ _ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "{system_text}"),
     ("human", "RECENT SESSIONS:\n{sessions_text}"),
 ])
-
-
-def _require_text(text):
-    if not text.strip():
-        raise ValueError("empty analysis")
-    return text.strip()
 
 
 def _sessions_text(data):
@@ -100,7 +95,7 @@ analysis_chain = (
     | _ANALYSIS_PROMPT
     | _report_writer
     | StrOutputParser()
-    | RunnableLambda(_require_text)
+    | RunnableLambda(lambda t: require_nonempty(t, "analysis"))
 ).with_fallbacks([RunnableLambda(_stub_analysis)])
 
 

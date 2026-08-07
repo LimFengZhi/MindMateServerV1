@@ -20,4 +20,4 @@ Layout (LangChain provides the components, LangGraph the control flow):
     graph.py        graph wiring + the compiled singleton + answer()
     voice.py        speech-to-text (independent of AI_MODE)
 """
-from app.agents.graph import answer, build_chat_graph  # noqa: F401
+from app.agents.graph import answer, build_chat_graph

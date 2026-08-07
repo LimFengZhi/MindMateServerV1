@@ -47,6 +47,15 @@ def needs_risk_check(escalated):
     return bool(escalated)
 
 
+def reply_extras(escalated):
+    """The extra reply-payload fields a turn carries. Built here so the live
+    reply (nodes.persist) and the reloaded/polled ones (repo._reply_extras)
+    can never disagree about what an escalated turn looks like."""
+    if needs_risk_check(escalated):
+        return {"suggestedTest": RISK_CHECK_SLUG}
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Generation cleanup + case-note detection (fine-tune habits)
 # ---------------------------------------------------------------------------
@@ -94,6 +103,17 @@ def tidy_reply(text):
 def is_bad_generation(reply):
     """Empty (all junk stripped) or narrating the user in third person."""
     return not reply or bool(CASE_NOTES_RE.search(reply))
+
+
+def require_nonempty(text, label):
+    """An empty generation isn't an exception — make it one, so the chain's
+    stub fallback fires instead of returning blank text (a blank summary would
+    make build_composed_system mislabel an ongoing chat as 'No prior
+    conversation'). `label` names what came back empty. Used by the summarize
+    chain (chains.py) and the session-analysis chain (report.py)."""
+    if not text.strip():
+        raise ValueError(f"empty {label}")
+    return text.strip()
 
 
 # ---------------------------------------------------------------------------

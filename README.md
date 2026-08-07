@@ -62,6 +62,18 @@ FLASK_HOST=127.0.0.1      # 0.0.0.0 to expose on your LAN
 > control (it's git-ignored). For anything beyond local dev, set a fixed
 > `SECRET_KEY`, add `SUPABASE_ANON_KEY`, and serve behind gunicorn/waitress.
 
+**Deploying: use ONE worker.**
+```bash
+gunicorn -w 1 -b 0.0.0.0:5000 "app:create_app()"
+```
+Four things live in process memory, so a second worker would silently get its own
+copy of each: the rate limiter's counters (`app/extensions.py`), the staff live-
+counselling claims (`app/admin/live_claims.py`), the crisis-email per-user
+cooldown (`app/email_utils.py`), and the session-analysis report cache
+(`app/admin/routes.py`). With `AI_MODE=real` each worker would also load its own
+multi-GB copy of the model weights. Scaling out means moving all of that to
+shared storage first — not just adding workers.
+
 **Optional — crisis email.** Set `crisis_email.enabled: true` in `config.yaml`
 and fill in the SMTP values in `.env`, and every crisis escalation emails the
 counselling information to the user's registered address (at most one email

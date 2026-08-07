@@ -8,9 +8,10 @@ are persisted to the bench_result table by the admin routes:
                    under the SAME composed system prompt. The two extra
                    models are lazy-loaded by the registry on first use.
   single_vs_multi  the current Gemma 2 chatbot answering ALONE with a minimal
-                   prompt (single agent) vs the full multi-agent treatment
-                   (diagnose → crisis short-circuit → tone + summary composed
-                   prompt → guarded generation).
+                   prompt (single agent) vs the full multi-agent treatment —
+                   which is not re-implemented here: the multi arm RUNS the
+                   app's compiled graph with only its DB ends swapped out, so
+                   it can never drift from what real users get.
 
 ("Normal — chat as a user" testing is NOT here: that is the existing test
 bench page, which chats through the real pipeline on real sessions and rates
@@ -20,9 +21,10 @@ import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agents import chains, stubs
+from app.agents import chains, nodes, stubs
 from app.agents.chat_models import LocalChatModel, ModelUnavailable
-from app.agents.guards import crisis_keywords_present, tidy_reply
+from app.agents.graph import build_chat_graph
+from app.agents.guards import tidy_reply
 from app.agents.prompt_loader import build_composed_system, build_single_system
 from app.agents.prompts import pairs_to_messages
 from app.agents.registry import registry
@@ -33,16 +35,15 @@ BENCH_MODES = ("models3", "single_vs_multi")
 _FIRST_MESSAGE_SUMMARY = ("This is the user's first message — the conversation "
                           "is just beginning.")
 
-# The two extra comparison models (family-specific chat-template details;
-# system_prefix keeps Qwen3 in its trained non-thinking mode).
-_FAMILIES = {
-    "llama32": {"label": "Llama 3.2 1B (fine-tuned)",
-                "stop": ("<|eot_id|>",), "fold_system": False,
-                "system_prefix": ""},
-    "qwen3": {"label": "Qwen3 1.7B (fine-tuned)",
-              "stop": ("<|im_end|>",), "fold_system": False,
-              "system_prefix": "/no_think\n"},
+# The two extra comparison models. The chat-template details (fold_system /
+# stop / system_prefix) come from chains.CHAT_FAMILIES so the bench can never
+# drift from the app; only the bench-only display label is defined here.
+_BENCH_LABELS = {
+    "llama32": "Llama 3.2 1B (fine-tuned)",
+    "qwen3": "Qwen3 1.7B (fine-tuned)",
 }
+_FAMILIES = {key: dict(chains.CHAT_FAMILIES[key], label=label)
+             for key, label in _BENCH_LABELS.items()}
 _extra_cache = {}
 
 _MAIN_LABELS = {"gemma2": "Gemma 2 2B", "qwen3": "Qwen3 1.7B",
@@ -75,6 +76,25 @@ def _chat(model, system_text, message, history=None):
                           *pairs_to_messages(history or []),
                           HumanMessage(content=message)])
     return tidy_reply(reply.content)
+
+
+_MULTI_GRAPH = None
+
+
+def _multi_graph():
+    """THE production graph with its two DB ends removed: history is seeded
+    into the initial state instead of read from Supabase, and the reply is
+    returned instead of persisted (the bench never touches sessions/messages,
+    and must not fire the crisis email). Every other node and edge is the real
+    one, so a pipeline change in nodes.py/graph.py reaches this page for free.
+    Compiled once — seeding via state (not a closure) is what allows caching."""
+    global _MULTI_GRAPH
+    if _MULTI_GRAPH is None:
+        _MULTI_GRAPH = build_chat_graph(
+            load_context=lambda s: nodes.with_memory_window(s.get("history") or []),
+            persist=lambda s: {"payload": {"reply": s["reply"]}},
+        ).compile()
+    return _MULTI_GRAPH
 
 
 def _timed(variant, label, fn):
@@ -129,8 +149,9 @@ def _run_single_vs_multi(message, histories):
     prompt rules: 'single' is the composed prompt with its summary/memory
     parts removed (the DB prompt with key 'single', admin-editable), so the
     comparison isolates the pipeline, not the wording. Across a session,
-    'single' carries verbatim history while 'multi' compresses its history
-    through the summarizer — exactly the difference being studied."""
+    'single' carries the WHOLE history verbatim; 'multi' runs the real graph,
+    so it keeps the last `memory.recent_turns` exchanges verbatim and reaches
+    the rest through the summarizer — exactly the difference being studied."""
     def single():
         try:
             return _chat(chains.chatbot,
@@ -144,18 +165,16 @@ def _run_single_vs_multi(message, histories):
                 "turn_count": len(histories.get("single") or []) + 1})
 
     def multi():
-        diag = chains.diagnose_chain.invoke(message)
-        if diag.get("risk_flag") or crisis_keywords_present(message):
-            return Config.CRISIS_MESSAGE
-        full = histories.get("multi") or []
-        summary = (chains.summarize_chain.invoke({"history": full}) if full
-                   else _FIRST_MESSAGE_SUMMARY)
-        return chains.reply_chain.invoke({
-            "message": message, "history": [], "turn_count": len(full),
-            "emotion": diag["emotion"], "summary": summary,
-        })
+        # Not an imitation of the pipeline — it IS the pipeline (see
+        # _multi_graph): load_context/diagnose/route_turn/crisis_reply/
+        # summarize/generate all run exactly as they do for a real user.
+        return _multi_graph().invoke({
+            "message": message,
+            "history": histories.get("multi") or [],
+            "mode": "bench",
+        })["payload"]["reply"]
 
     return [
-        _timed("single", "Single agent — same rules, no pipeline (no summary/diagnosis/guardrails)", single),
-        _timed("multi", "Multi-agent — diagnose → tone + summary → guarded generation", multi),
+        _timed("single", "Single agent — same rules, no pipeline (whole history verbatim, no diagnosis/summary/guardrails)", single),
+        _timed("multi", "Multi-agent — the real pipeline: diagnose > crisis route > recent turns + summary > guarded generation", multi),
     ]

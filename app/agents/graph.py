@@ -19,15 +19,19 @@ from app.agents import nodes
 from app.agents.state import ChatState
 
 
-def build_chat_graph():
+def build_chat_graph(load_context=None, persist=None):
+    """The pipeline. The two DB-bound ends can be replaced so a caller without
+    a database runs the SAME graph over in-memory history (the staff bench does
+    exactly that) — every other node, edge and route is shared, which is the
+    point: change the pipeline here and in nodes.py, and the bench follows."""
     g = StateGraph(ChatState)
 
-    g.add_node("load_context", nodes.load_context)
+    g.add_node("load_context", load_context or nodes.load_context)
     g.add_node("diagnose", nodes.diagnose)
     g.add_node("crisis_reply", nodes.crisis_reply)
     g.add_node("summarize", nodes.summarize)
     g.add_node("generate", nodes.generate)
-    g.add_node("persist", nodes.persist)
+    g.add_node("persist", persist or nodes.persist)
 
     g.add_edge(START, "load_context")
     g.add_edge("load_context", "diagnose")

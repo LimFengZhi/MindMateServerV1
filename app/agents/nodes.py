@@ -6,9 +6,7 @@ fallback policies). Keeping nodes this thin makes them independently testable
 and lets the graph be re-wired without touching behavior.
 """
 from app.agents import chains
-from app.agents.guards import (
-    RISK_CHECK_SLUG, crisis_keywords_present, needs_risk_check,
-)
+from app.agents.guards import crisis_keywords_present, reply_extras
 from app.config import Config
 from app.db.repo import add_message, get_history
 
@@ -21,13 +19,21 @@ RECENT_TURNS = Config.RECENT_TURNS
 # ---------------------------------------------------------------------------
 # Context + diagnostics
 # ---------------------------------------------------------------------------
-def load_context(state):
-    """Full session history, split into the verbatim window the chatbot sees
-    and the remainder that only reaches it through the summary. (list[-0:] is
+def with_memory_window(history):
+    """A history -> the context keys the rest of the pipeline runs on: the
+    verbatim window the chatbot sees, and the full list the summary is built
+    from. Separate from the DB read so a caller that already HAS the history
+    (the staff bench) reuses this rule instead of restating it. (list[-0:] is
     the WHOLE list in Python, so RECENT_TURNS == 0 is handled explicitly.)"""
-    history = get_history(state["user_id"], state["session_id"], limit=None)
     recent = history[-RECENT_TURNS:] if RECENT_TURNS > 0 else []
     return {"history": history, "recent": recent}
+
+
+def load_context(state):
+    """Full session history, split into the verbatim window the chatbot sees
+    and the remainder that only reaches it through the summary."""
+    return with_memory_window(
+        get_history(state["user_id"], state["session_id"], limit=None))
 
 
 def diagnose(state):
@@ -126,6 +132,5 @@ def persist(state):
     }
     # Crisis turns point the user at the in-app Suicide Risk Check quiz.
     # The frontend renders this as a link on the reply.
-    if needs_risk_check(state["escalated"]):
-        payload["suggestedTest"] = RISK_CHECK_SLUG
+    payload.update(reply_extras(state["escalated"]))
     return {"payload": payload}

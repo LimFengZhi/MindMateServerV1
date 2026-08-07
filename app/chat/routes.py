@@ -5,7 +5,6 @@ import tempfile
 from flask import Blueprint, request, jsonify, g
 
 from app.agents import answer
-from app.agents.guards import route_modality
 from app.agents.voice import transcribe, voice_available
 from app.auth.decorators import login_required, get_owned_session
 from app.db.repo import SessionDeleted
@@ -70,7 +69,6 @@ def _transcribe_upload(f):
         f.save(tmp.name)
         tmp_path = tmp.name
     try:
-        route_modality(has_audio=True)   # modality route -> "voice"
         return transcribe(tmp_path)
     finally:
         os.unlink(tmp_path)
