@@ -2,6 +2,10 @@
 
 {% block title %}Login{% endblock %}
 
+{# Same as the in-app pages: paint edge-to-edge on notched phones. .auth-wrap
+   pads itself with the safe-area insets so nothing lands under the hardware. #}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
+
 {% block body %}
   <div class="auth-wrap">
     <div class="auth-card">
