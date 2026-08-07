@@ -52,9 +52,12 @@ def _register_pages(app):
     def root():
         return redirect("/chat")
 
+    # min_age reaches the date-of-birth field as a data attribute so the
+    # client-side courtesy check uses the SAME number as the server (the real
+    # gate is profile_utils.dob_error). Tuned in config.yaml, not here.
     @app.route("/login")
     def login_page():
-        return render_template("login.html")
+        return render_template("login.html", min_age=Config.PROFILE_MIN_AGE)
 
     @app.route("/chat")
     def chat_page():
@@ -67,6 +70,10 @@ def _register_pages(app):
     @app.route("/resources")
     def resources_page():
         return render_template("resources.html")
+
+    @app.route("/profile")
+    def profile_page():
+        return render_template("profile.html", min_age=Config.PROFILE_MIN_AGE)
 
     # Serve bundled assets (logo, etc.) from app/assets/.
     @app.route("/assets/<path:filename>")

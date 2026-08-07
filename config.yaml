@@ -5,7 +5,8 @@
 #   .env         secrets + machine-specific settings (Supabase keys, model
 #                paths, devices, AI_MODE). Never committed.
 #   config.yaml  application tuning that is safe to commit and identical on
-#                every machine: generation parameters, memory window, risk
+#                every machine: generation parameters, memory window, the
+#                accepted profile age range, risk
 #                thresholds, crisis message.
 #
 # Everything here is read ONCE at boot through app/config.py (Config.*) —
@@ -34,6 +35,16 @@ memory:
   # 'first message' rule can't misfire mid-chat), everything older is
   # compressed. 0 = summary-only (the earlier research design).
   recent_turns: 2
+
+profile:
+  # Accepted age range at registration and on the My Profile page. Age is
+  # NEVER stored — profiles.date_of_birth is, and the age is derived from it
+  # on every read (app/profile_utils.py), so these bounds are checked against
+  # a freshly computed number, not a stale column.
+  # 13 is the usual floor for a service used without a guardian; raise it if
+  # your ethics approval requires it. max_age only rejects nonsense dates.
+  min_age: 13
+  max_age: 120
 
 risk:
   # Classifier label that counts as suicide risk.

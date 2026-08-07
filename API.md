@@ -103,9 +103,14 @@ Response `200`:
 Request:
 ```json
 { "email": "you@example.com", "password": "min 6 chars",
-  "phone": "+60123456789", "agree": true }
+  "name": "Ada Lovelace", "phone": "+60123456789",
+  "dateOfBirth": "1998-04-23", "gender": "female", "agree": true }
 ```
-`phone` is **required**: optional leading `+`, then 7–15 digits (spaces/dashes/parentheses are stripped server-side). Stored in the user's profile.
+Every field above is **required** and stored in the user's profile:
+- `name` — 1–60 characters.
+- `phone` — optional leading `+`, then 7–15 digits (spaces/dashes/parentheses are stripped server-side).
+- `dateOfBirth` — ISO `YYYY-MM-DD`; the user must be at least `profile.min_age` (config.yaml, default **13**). Age is *derived* from this on read and never stored, so it can't go stale.
+- `gender` — one of `female` · `male` · `other` · `prefer_not_to_say`.
 Response `201` (email verification on — the normal case):
 ```json
 { "needsVerification": true, "message": "Account created! Check your email…" }
@@ -114,7 +119,8 @@ Response `201` (if email confirmation is disabled on Supabase):
 ```json
 { "needsVerification": false, "token": "jwt…", "refreshToken": "…", "message": "Account created!" }
 ```
-Errors: `400 {error}` (invalid email / password < 6 / invalid phone / `agree` not true),
+Errors: `400 {error}` (invalid email / password < 6 / missing name / invalid phone /
+invalid or under-13 date of birth / invalid gender / `agree` not true),
 `429 {error}` (Supabase email rate limit).
 
 ### 3) POST `/auth/login` — public · rate‑limited 10/min
@@ -130,8 +136,24 @@ Errors: `401 { "error": "Invalid email or password." }`,
 Response `200`: `{ "ok": true }` (just drop the token client‑side).
 
 ### 5) GET `/auth/me` — auth
-Response `200`: `{ "id": "uuid", "email": "…", "role": "user", "phone": "+60123456789" }`
-(`phone` is `null` for accounts created before the phone requirement.)
+Response `200`:
+```json
+{ "id": "uuid", "email": "…", "role": "user", "name": "Ada Lovelace",
+  "phone": "+60123456789", "dateOfBirth": "1998-04-23", "gender": "female",
+  "age": 28, "joinedAt": "2026-06-27T09:54:09Z" }
+```
+`age` is computed from `dateOfBirth` on every read — it is not a stored column.
+Any profile field is `null` for accounts created outside the registration form
+(e.g. staff accounts made through the Supabase admin API).
+
+### 5b) PATCH `/auth/me` — auth
+Edit your own profile. Send only the fields you want to change; omitted fields are
+left alone. `email` and `role` are **not** editable here (role must never be
+self-assignable).
+Request: `{ "name": "…", "phone": "…", "dateOfBirth": "1998-04-23", "gender": "male" }`
+Response `200`: the same shape as `GET /auth/me`.
+Errors: `400 {error}` (a sent field fails the same validation as registration, or
+nothing to update), `500 {error}` (save failed).
 
 ### 6) GET `/sessions` — auth
 Response `200`:

@@ -6,6 +6,8 @@ crashing the download.
 """
 from fpdf import FPDF
 
+from app.profile_utils import gender_label
+
 _MARGIN = 16
 
 
@@ -59,7 +61,16 @@ def render_report_pdf(report):
     pdf.add_page()
 
     user = report["user"]
-    pdf.kv("User", user.get("email"))
+    pdf.kv("Name", user.get("name"))
+    pdf.kv("Email", user.get("email"))
+    # Age is derived from date_of_birth at read time, so a stored report never
+    # carries a stale number (see app/profile_utils.py).
+    age, gender = user.get("age"), user.get("gender")
+    pdf.kv("Age / gender", " / ".join([
+        str(age) if age is not None else "-",
+        # not gender_label(None): its em-dash placeholder isn't latin-1.
+        gender_label(gender) if gender else "-",
+    ]))
     pdf.kv("Phone", user.get("phone"))
     pdf.kv("Joined", (user.get("joinedAt") or "")[:10] or None)
     pdf.kv("Generated", (report.get("generatedAt") or "")[:16].replace("T", " ")

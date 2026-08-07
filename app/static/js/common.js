@@ -117,6 +117,35 @@ function fmtDate(iso) {
          `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// "1998-04-23" -> whole years, or null if missing/unparseable. Mirrors
+// profile_utils.age_from_dob on the server: age is never stored, only derived.
+function ageFromDOB(iso) {
+  if (!iso) return null;
+  const dob = new Date(iso + "T00:00:00");
+  if (isNaN(dob)) return null;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const beforeBirthday = now.getMonth() < dob.getMonth() ||
+    (now.getMonth() === dob.getMonth() && now.getDate() < dob.getDate());
+  return beforeBirthday ? age - 1 : age;
+}
+
+// The minimum age, read off the date-of-birth field's data-min-age (rendered
+// from config.yaml's profile.min_age). Keeps the client's courtesy check on
+// the same number as the server, which is the real gate.
+function minAgeFrom(dobInput) {
+  return parseInt(dobInput?.dataset?.minAge, 10) || 13;
+}
+
+// Stored gender value -> label. Mirrors profile_utils.GENDERS.
+const GENDER_LABELS = {
+  female: "Female", male: "Male", other: "Other",
+  prefer_not_to_say: "Prefer not to say",
+};
+function genderLabel(value) {
+  return GENDER_LABELS[value] || value || "—";
+}
+
 /* ---------- Shared page helpers ---------- */
 // Roles allowed into the staff site (mirrors staff_required on the server).
 const STAFF_ROLES = ["staff", "admin"];

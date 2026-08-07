@@ -63,6 +63,28 @@ def get_profile(user_id):
     return res.data[0] if res.data else None
 
 
+# Columns a user may change about themselves. `role` and `email` are absent on
+# purpose: role must never be self-assignable, and email belongs to Supabase
+# Auth. The route validates the VALUES; this set is the hard boundary on WHICH
+# columns can be touched, so a crafted request can't reach anything else.
+EDITABLE_PROFILE_FIELDS = frozenset(
+    {"display_name", "phone", "gender", "date_of_birth"})
+
+
+def update_profile(user_id, updates):
+    """Owner-scoped profile edit. Returns the updated row, or None if nothing
+    was writable or the id was malformed."""
+    safe = {k: v for k, v in updates.items() if k in EDITABLE_PROFILE_FIELDS}
+    if not safe:
+        return None
+    res = _execute_or_none(get_sb().table("profiles")
+                           .update(safe)
+                           .eq("id", user_id))
+    if res is None:
+        return None
+    return res.data[0] if res.data else None
+
+
 def get_role(user_id):
     profile = get_profile(user_id)
     return (profile or {}).get("role", "user")

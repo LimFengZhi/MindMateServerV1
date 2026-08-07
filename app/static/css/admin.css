@@ -103,7 +103,7 @@
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .flex-between.wrap-start { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
 .btn-row { display: flex; gap: 10px; }
-.no-margin { margin: 0; }
+/* .no-margin lives in style.css (shared with the user-side profile page) */
 .pointer { cursor: pointer; }
 .strong { font-weight: 600; }
 .accent { color: var(--blue); }

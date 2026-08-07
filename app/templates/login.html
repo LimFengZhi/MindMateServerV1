@@ -26,12 +26,32 @@
           onkeydown="if(event.key==='Enter') submitAuth()" />
       </label>
 
-      <!-- Register-only: phone number + the User Agreement (from the database) -->
+      <!-- Register-only: profile details + the User Agreement (from the database) -->
       <div id="registerExtras" class="hidden">
+        <label class="field">
+          <span>Full name</span>
+          <input id="name" type="text" autocomplete="name" maxlength="60"
+                 placeholder="Your name" />
+        </label>
         <label class="field">
           <span>Phone number</span>
           <input id="phone" type="tel" autocomplete="tel"
                  placeholder="+60 12-345 6789" />
+        </label>
+        <label class="field">
+          <span>Date of birth</span>
+          <input id="dateOfBirth" type="date" autocomplete="bday"
+                 data-min-age="{{ min_age }}" />
+        </label>
+        <label class="field">
+          <span>Gender</span>
+          <select id="gender">
+            <option value="">Select…</option>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
         </label>
         <div class="agreement-box">
           <div class="agreement-head">

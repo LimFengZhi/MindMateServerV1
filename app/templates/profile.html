@@ -1,0 +1,61 @@
+{% extends "app_base.html" %}
+{% set active_page = "profile" %}
+
+{% block title %}My Profile{% endblock %}
+
+{% block topbar_title %}
+  <strong class="topbar-title">My Profile</strong>
+{% endblock %}
+
+{% block main %}
+  <main class="content scroll">
+    <div class="profile-wrap">
+      <div class="profile-card">
+        <h3>Your details</h3>
+        <p class="muted profile-note">
+          Your counsellor sees these alongside your chats. Email cannot be
+          changed here.
+        </p>
+
+        <label class="field">
+          <span>Email</span>
+          <input id="pfEmail" type="email" disabled />
+        </label>
+        <label class="field">
+          <span>Full name</span>
+          <input id="pfName" type="text" maxlength="60" placeholder="Your name" />
+        </label>
+        <label class="field">
+          <span>Phone number</span>
+          <input id="pfPhone" type="tel" placeholder="+60 12-345 6789" />
+        </label>
+        <label class="field">
+          <span>Date of birth <em id="pfAge" class="muted"></em></span>
+          <input id="pfDob" type="date" onchange="showAge()"
+                 data-min-age="{{ min_age }}" />
+        </label>
+        <label class="field">
+          <span>Gender</span>
+          <select id="pfGender">
+            <option value="">Select…</option>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+
+        <div class="profile-actions">
+          <button id="pfSave" class="btn btn-primary" onclick="saveProfile()">Save changes</button>
+          <p id="pfMsg" class="auth-msg no-margin"></p>
+        </div>
+
+        <p class="muted profile-joined" id="pfJoined"></p>
+      </div>
+    </div>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/profile.js') }}"></script>
+{% endblock %}

@@ -147,6 +147,10 @@ class Config:
     # --- Memory window (see config.yaml for what 0 means) ---
     RECENT_TURNS = int(_yaml("memory", "recent_turns", 0))
 
+    # --- Profile rules (registration + My Profile; see app/profile_utils.py) ---
+    PROFILE_MIN_AGE = int(_yaml("profile", "min_age", 13))
+    PROFILE_MAX_AGE = int(_yaml("profile", "max_age", 120))
+
     # --- Diagnostic / routing (emotion classifier) ---
     RISK_CLASS = _yaml("risk", "class", "Suicidal")
     RISK_THRESHOLD = float(_yaml("risk", "escalation_threshold", 0.8))

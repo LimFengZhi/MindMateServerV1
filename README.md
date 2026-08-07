@@ -110,10 +110,14 @@ agreement, the agents' prompts, and the self-tests (missing tests are also
 topped up on later boots — no action needed).
 
 ### First use
-1. Go to **Register**, enter your **email, password and phone number**, read
-   the **User Agreement**, tick the box, and sign up.
+1. Go to **Register** and fill in **email, password, name, phone number, date
+   of birth and gender** (all required — you must be at least 13), read the
+   **User Agreement**, tick the box, and sign up.
 2. Check your email and click the verification link.
 3. Come back and **Log in**.
+4. Your details are editable later under **My Profile** in the sidebar. Age is
+   never stored — it's calculated from the date of birth each time it's shown,
+   so it can't go stale.
 
 ### Resetting the database (full wipe)
 `schema.sql` is a **reset script**: running it drops every app table **and
@@ -125,8 +129,8 @@ including your admin login. Full checklist, in order:
    agent prompts, and the self-tests automatically.
 3. Re-upload the Resources content: `python scripts/scrape_resources.py`.
 4. **Re-create your admin login:** register a fresh account in the app
-   (email + password + phone), verify the email, then promote it in the
-   Supabase SQL editor:
+   (email + password + name + phone + date of birth + gender), verify the
+   email, then promote it in the Supabase SQL editor:
    ```sql
    update public.profiles set role = 'admin' where email = 'you@example.com';
    ```
@@ -173,8 +177,8 @@ Every user gets the `user` role automatically (via the `profiles` table).
     month**: totals, the affected users ranked highest-first (with phone), and
     whether each completed the **Suicide Risk Check** quiz in that window
   - **Emotion Analysis** — emotion distribution + escalations across all users
-  - **User Sessions** — every registered user with their info (email, phone,
-    joined date, chat counts); open a user → pick a chat → review the
+  - **User Sessions** — every registered user with their info (name, email,
+    age, gender, phone, joined date, chat counts); open a user → pick a chat → review the
     transcript with per-reply diagnostics; **rate each bot reply (1–5 ★),
     leave feedback**, **export the session as JSON**, or click **📄 Report** to
     generate a **session-analysis report** of the user's recent chats (written

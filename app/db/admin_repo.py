@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from app.db.repo import APIError, _none_if_bad_uuid
 from app.extensions import get_sb
+from app.profile_utils import age_from_dob
 
 
 def _retry_once(call):
@@ -630,7 +631,8 @@ _RISK_TEST_SLUG = "suicide-risk-check"
 
 def _profiles_by_user():
     rows = (_retry_once(lambda: get_sb().table("profiles")
-                        .select("id, email, phone, role, created_at")
+                        .select("id, email, display_name, phone, gender, "
+                                "date_of_birth, role, created_at")
                         .execute())).data or []
     return {p["id"]: p for p in rows}
 
@@ -722,7 +724,11 @@ def list_users_overview():
     users = [{
         "userID": uid,
         "email": p.get("email") or "unknown",
+        "name": p.get("display_name"),
         "phone": p.get("phone"),
+        "gender": p.get("gender"),
+        # Derived, never stored — see app/profile_utils.py.
+        "age": age_from_dob(p.get("date_of_birth")),
         "role": p.get("role") or "user",
         "joinedAt": p.get("created_at"),
         "sessions": sess_counts.get(uid, 0),
@@ -739,7 +745,8 @@ def get_user_report_data(user_id, recent_sessions=3):
     Returns None for an unknown user."""
     try:
         prof = (_retry_once(lambda: get_sb().table("profiles")
-                            .select("id, email, phone, role, created_at")
+                            .select("id, email, display_name, phone, gender, "
+                                    "date_of_birth, role, created_at")
                             .eq("id", user_id).limit(1).execute())).data or []
     except APIError as e:
         return _none_if_bad_uuid(e)
@@ -771,7 +778,10 @@ def get_user_report_data(user_id, recent_sessions=3):
         "user": {
             "userID": p["id"],
             "email": p.get("email") or "unknown",
+            "name": p.get("display_name"),
             "phone": p.get("phone"),
+            "gender": p.get("gender"),
+            "age": age_from_dob(p.get("date_of_birth")),   # derived, not stored
             "role": p.get("role") or "user",
             "joinedAt": p.get("created_at"),
         },

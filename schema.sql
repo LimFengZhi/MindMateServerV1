@@ -53,28 +53,45 @@ create extension if not exists pgcrypto;
 -- 1. profiles: one row per auth user, holds role + email. Auto-created by a
 --    trigger when a user signs up (handle_new_user below).
 -- ---------------------------------------------------------------------------
+-- display_name / phone / gender / date_of_birth are all REQUIRED at
+-- registration (validated by the API in auth/routes.py) but nullable here, so
+-- staff accounts created through the Supabase admin API don't break.
+-- Age is NOT stored: it is derived from date_of_birth on read, so it can never
+-- go stale (repo.profile_age).
 create table public.profiles (
-    id           uuid primary key references auth.users(id) on delete cascade,
-    email        text,
-    display_name text,
-    phone        text,   -- required at registration (validated by the API);
-                         -- nullable here so staff-created accounts don't break
-    role         text not null default 'user'
-                 check (role in ('user', 'staff', 'admin')),
-    created_at   timestamptz not null default now()
+    id            uuid primary key references auth.users(id) on delete cascade,
+    email         text,
+    display_name  text,
+    phone         text,
+    gender        text check (gender is null or gender in
+                  ('female', 'male', 'other', 'prefer_not_to_say')),
+    date_of_birth date check (date_of_birth is null or
+                  (date_of_birth > '1900-01-01' and date_of_birth < current_date)),
+    role          text not null default 'user'
+                  check (role in ('user', 'staff', 'admin')),
+    created_at    timestamptz not null default now()
 );
 
--- Auto-create a profile row whenever a new auth user is created. The phone
--- number arrives via the signup metadata (register() passes options.data),
--- so it lands here even before the email is verified.
+-- Auto-create a profile row whenever a new auth user is created. The details
+-- collected at sign-up arrive via the signup metadata (register() passes
+-- options.data), so they land here even before the email is verified.
+-- nullif(...,'') keeps a blank string out of the date column (it would raise);
+-- the API has already validated these, so a blank only happens for accounts
+-- created outside the registration form.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
 begin
-    insert into public.profiles (id, email, phone)
-    values (new.id, new.email, new.raw_user_meta_data->>'phone')
+    insert into public.profiles (id, email, display_name, phone,
+                                 gender, date_of_birth)
+    values (new.id,
+            new.email,
+            nullif(new.raw_user_meta_data->>'display_name', ''),
+            nullif(new.raw_user_meta_data->>'phone', ''),
+            nullif(new.raw_user_meta_data->>'gender', ''),
+            nullif(new.raw_user_meta_data->>'date_of_birth', '')::date)
     on conflict (id) do nothing;
     return new;
 end;

@@ -27,16 +27,23 @@ class AuthError(Exception):
         self.status = status
 
 
-def register(email, password, phone=None):
+def register(email, password, phone=None, name=None, gender=None,
+             date_of_birth=None):
     """Create an account and trigger the verification email.
 
-    `phone` travels as signup metadata: the handle_new_user trigger copies it
-    into profiles.phone, so it is stored even before the email is verified.
+    The profile details travel as signup metadata: the handle_new_user trigger
+    copies them into `profiles`, so they are stored even before the email is
+    verified. Keys here must match the ->> lookups in schema.sql. Already
+    validated by the route; blanks are dropped so the trigger's nullif() keeps
+    empty strings out of the columns.
 
     Returns a dict describing whether verification is still pending. If the
     project has email confirmation disabled, Supabase returns a session and the
     user is logged in immediately.
     """
+    metadata = {k: v for k, v in (("phone", phone), ("display_name", name),
+                                  ("gender", gender),
+                                  ("date_of_birth", date_of_birth)) if v}
     client = new_auth_client()
     try:
         res = client.auth.sign_up({
@@ -44,7 +51,7 @@ def register(email, password, phone=None):
             "password": password,
             "options": {
                 "email_redirect_to": Config.SITE_URL + "/login",
-                "data": {"phone": phone} if phone else {},
+                "data": metadata,
             },
         })
     except AuthApiError as e:

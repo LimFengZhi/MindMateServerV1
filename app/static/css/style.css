@@ -162,16 +162,20 @@ a:hover { text-decoration: underline; }
 
 .field { display: block; margin-bottom: 15px; }
 .field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 7px; font-weight: 500; }
-.field input {
+/* select is included so the register/profile dropdowns match the text inputs */
+.field input,
+.field select {
   width: 100%; padding: 12px 14px;
   background: var(--bg-soft); border: 1px solid var(--border-strong);
   border-radius: 11px; color: var(--text); font: inherit;
   transition: border-color .18s, box-shadow .18s;
 }
 .field input::placeholder { color: var(--faint); }
+.field input:disabled { color: var(--muted); cursor: not-allowed; }
 
 /* shared focus ring for text inputs (login fields + chat composer) */
 .field input:focus,
+.field select:focus,
 #message:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
 
 .auth-msg { min-height: 18px; margin: 13px 0 0; font-size: 13px; text-align: center; color: var(--muted); }
@@ -536,6 +540,21 @@ a:hover { text-decoration: underline; }
   .msg .bubble { max-width: 92%; font-size: 14px; }
 }
 
+/* ===================== MY PROFILE ===================== */
+.profile-wrap { max-width: 560px; margin: 0 auto; }
+.profile-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 24px; box-shadow: var(--shadow);
+}
+.profile-card h3 { margin: 0 0 6px; }
+.profile-note { margin: 0 0 20px; }
+.profile-card .field span em { font-style: normal; margin-left: 6px; }
+.profile-actions { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+.profile-joined { margin: 18px 0 0; text-align: right; }
+
 /* ===================== UTILITIES =====================
    !important so the utility always wins, like the inline styles it replaced. */
 .text-danger { color: var(--danger) !important; }
+/* moved here from admin.css: the profile page needs it too, and admin.css
+   layers on this file, so shared utilities belong in the base. */
+.no-margin { margin: 0; }

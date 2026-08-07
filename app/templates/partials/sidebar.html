@@ -1,12 +1,14 @@
 {#
-  Shared sidebar. Expects `active_page` ("chat" | "analysis" | "resources")
-  to be set by the page template. On the chat page the "New chat" action is a
-  JS button and the recent-chats list is shown; elsewhere it links to /chat.
+  Shared sidebar. Expects `active_page` ("chat" | "analysis" | "resources" |
+  "profile") to be set by the page template. On the chat page the "New chat"
+  action is a JS button and the recent-chats list is shown; elsewhere it links
+  to /chat.
 #}
 {% set nav_links = [
   ("chat",      "/chat",      "💬", "Chat"),
   ("analysis",  "/analysis",  "📊", "My Emotions"),
   ("resources", "/resources", "📚", "Resources"),
+  ("profile",   "/profile",   "👤", "My Profile"),
 ] %}
 
 <aside id="sidebar">

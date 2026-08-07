@@ -68,10 +68,29 @@ async function submitAuth() {
       setAuthMsg("Password must be at least 6 characters.", "error");
       return;
     }
+    if (!$("name").value.trim()) {
+      setAuthMsg("Please enter your name.", "error");
+      return;
+    }
     // 7-15 digits once spaces/dashes are stripped (server re-validates).
     const phoneDigits = $("phone").value.replace(/[ \-().]/g, "");
     if (!/^\+?\d{7,15}$/.test(phoneDigits)) {
       setAuthMsg("Please enter a valid phone number (e.g. +60123456789).", "error");
+      return;
+    }
+    // Client-side courtesy only — profile_utils.dob_error is the real gate.
+    const minAge = minAgeFrom($("dateOfBirth"));
+    const age = ageFromDOB($("dateOfBirth").value);
+    if (age === null) {
+      setAuthMsg("Please enter your date of birth.", "error");
+      return;
+    }
+    if (age < minAge) {
+      setAuthMsg(`You must be at least ${minAge} years old to register.`, "error");
+      return;
+    }
+    if (!$("gender").value) {
+      setAuthMsg("Please select a gender.", "error");
       return;
     }
     if (!$("agreeChk").checked) {
@@ -91,8 +110,13 @@ async function submitAuth() {
     if (authMode === "register") {
       const r = await api("/auth/register", {
         method: "POST",
-        body: JSON.stringify({ email, password, agree: true,
-                               phone: $("phone").value.trim() }),
+        body: JSON.stringify({
+          email, password, agree: true,
+          name: $("name").value.trim(),
+          phone: $("phone").value.trim(),
+          gender: $("gender").value,
+          dateOfBirth: $("dateOfBirth").value,
+        }),
       });
       if (r.error) { setAuthMsg(r.error, "error"); return; }
 

@@ -528,9 +528,12 @@ function renderUsersList() {
   $("sessionsBody").innerHTML = usersOverview.map((u, i) => `
     <div class="sess-row">
       <div class="sess-main" onclick="openUser(${i})">
-        <div class="sess-title">👤 ${escapeHTML(u.email)}
+        <div class="sess-title">👤 ${escapeHTML(u.name || u.email)}
           ${u.role !== "user" ? `<span class="tag">${escapeHTML(u.role)}</span>` : ""}</div>
-        <div class="sess-sub">${u.phone ? "📞 " + escapeHTML(u.phone) + " · " : ""}
+        <div class="sess-sub">${u.name ? escapeHTML(u.email) + " · " : ""}
+          ${u.age !== null && u.age !== undefined ? "age " + u.age + " · " : ""}
+          ${u.gender ? escapeHTML(genderLabel(u.gender)) + " · " : ""}
+          ${u.phone ? "📞 " + escapeHTML(u.phone) + " · " : ""}
           joined ${escapeHTML(fmtDate(u.joinedAt))}
           · ${u.sessions} chats · ${u.messages} messages
           ${u.escalations ? `· <span class="tag escalated">${u.escalations} escalations</span>` : ""}</div>
@@ -578,8 +581,11 @@ function renderUserReport(rep) {
     <div class="back-link" onclick="renderUsersList()">← All users</div>
     <div class="review-head">
       <div>
-        <div class="sess-title">📄 Session analysis — ${escapeHTML(rep.user.email)}</div>
-        <div class="sess-sub">${rep.sessionCount} recent session(s)
+        <div class="sess-title">📄 Session analysis — ${escapeHTML(rep.user.name || rep.user.email)}</div>
+        <div class="sess-sub">${rep.user.name ? escapeHTML(rep.user.email) + " · " : ""}
+          ${rep.user.age !== null && rep.user.age !== undefined ? "age " + rep.user.age + " · " : ""}
+          ${rep.user.gender ? escapeHTML(genderLabel(rep.user.gender)) + " · " : ""}
+          ${rep.sessionCount} recent session(s)
           · generated ${escapeHTML(fmtDate(rep.generatedAt))}</div>
       </div>
       <button class="btn btn-primary" onclick="downloadUserReport('${rep.user.userID}')">
