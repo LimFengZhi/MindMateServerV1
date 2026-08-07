@@ -4,9 +4,11 @@ Two one-shot comparison modes — neither touches sessions/messages; results
 are persisted to the bench_result table by the admin routes:
 
   models3          the same message answered by the three fine-tuned study
-                   models (Gemma 2 = the live app model, Llama 3.2, Qwen3)
-                   under the SAME composed system prompt. The two extra
-                   models are lazy-loaded by the registry on first use.
+                   models (Gemma 2, Llama 3.2, Qwen3) under the SAME composed
+                   system prompt. Whichever one the app already serves answers
+                   from the loaded chatbot; the other two are loaded one at a
+                   time and freed straight after — all three together do not
+                   fit in VRAM beside the chatbot.
   single_vs_multi  the current Gemma 2 chatbot answering ALONE with a minimal
                    prompt (single agent) vs the full multi-agent treatment —
                    which is not re-implemented here: the multi arm RUNS the
@@ -35,15 +37,16 @@ BENCH_MODES = ("models3", "single_vs_multi")
 _FIRST_MESSAGE_SUMMARY = ("This is the user's first message — the conversation "
                           "is just beginning.")
 
-# The two extra comparison models. The chat-template details (fold_system /
+# The study's three chat models. The chat-template details (fold_system /
 # stop / system_prefix) come from chains.CHAT_FAMILIES so the bench can never
-# drift from the app; only the bench-only display label is defined here.
-_BENCH_LABELS = {
+# drift from the app; only the display label is defined here.
+_STUDY_LABELS = {
+    "gemma2": "Gemma 2 2B (fine-tuned)",
     "llama32": "Llama 3.2 1B (fine-tuned)",
     "qwen3": "Qwen3 1.7B (fine-tuned)",
 }
 _FAMILIES = {key: dict(chains.CHAT_FAMILIES[key], label=label)
-             for key, label in _BENCH_LABELS.items()}
+             for key, label in _STUDY_LABELS.items()}
 _extra_cache = {}
 
 _MAIN_LABELS = {"gemma2": "Gemma 2 2B", "qwen3": "Qwen3 1.7B",
@@ -51,6 +54,17 @@ _MAIN_LABELS = {"gemma2": "Gemma 2 2B", "qwen3": "Qwen3 1.7B",
 MAIN_LABEL = (_MAIN_LABELS.get(Config.CHAT_MODEL_FAMILY,
                                Config.CHAT_MODEL_FAMILY)
               + " (current app model)")
+
+
+def extra_keys():
+    """The study models the bench must LOAD: all of them except whichever one
+    the app already serves (that one is answered by chains.chatbot). So the
+    comparison always shows three distinct models, never the same weights
+    twice, whatever CHAT_MODEL_PATH points at. Excluding by family also keeps
+    the variant keys unique — the app's card is keyed by its own family."""
+    return [k for k in _STUDY_LABELS
+            if k != Config.CHAT_MODEL_FAMILY
+            and not registry.bench_shares_app_weights(k)]
 
 
 def _extra_model(key):
@@ -125,22 +139,36 @@ def run_bench(mode, message, histories=None):
 
 
 def _run_three_models(message, histories):
-    """Same message, same composed system prompt, three fine-tuned models —
-    each continuing its OWN verbatim history from the session's prior turns."""
+    """Same message, same composed system prompt, the study's three fine-tuned
+    models — each continuing its OWN verbatim history from the session's prior
+    turns.
+
+    The app's own model answers from the already-loaded chatbot (no second copy
+    of the same weights in VRAM), and its card is keyed by CHAT_MODEL_FAMILY so
+    the variant keys stay unique. The other two are loaded ONE AT A TIME and
+    freed immediately after, because the three merged models together (5.0 +
+    3.3 + 2.4 GB) do not fit on a small card alongside the chatbot."""
+    app_key = Config.CHAT_MODEL_FAMILY
     diag = chains.diagnose_chain.invoke(message)
-    any_history = any(histories.get(v) for v in ("gemma2", *_FAMILIES))
+    any_history = any(histories.get(v) for v in _STUDY_LABELS)
     summary_line = ("The conversation so far is shown in the previous messages."
                     if any_history else _FIRST_MESSAGE_SUMMARY)
     system_text = build_composed_system(diag["emotion"], summary_line)
-    results = [_timed("gemma2", MAIN_LABEL,
+    results = [_timed(app_key, MAIN_LABEL,
                       lambda: _chat(chains.chatbot,
                                     chains.CHAT_FAMILY["system_prefix"] + system_text,
-                                    message, histories.get("gemma2")))]
-    for key, fam in _FAMILIES.items():
-        results.append(_timed(key, fam["label"],
-                              lambda k=key, f=fam: _chat(
-                                  _extra_model(k), f["system_prefix"] + system_text,
-                                  message, histories.get(k))))
+                                    message, histories.get(app_key)))]
+    for key in extra_keys():
+        fam = _FAMILIES[key]
+        try:
+            results.append(_timed(key, fam["label"],
+                                  lambda k=key, f=fam: _chat(
+                                      _extra_model(k), f["system_prefix"] + system_text,
+                                      message, histories.get(k))))
+        finally:
+            # Peak VRAM stays at chatbot + ONE extra, and the chat service gets
+            # the memory back the moment the run ends.
+            registry.free_bench_model(key)
     return results
 
 

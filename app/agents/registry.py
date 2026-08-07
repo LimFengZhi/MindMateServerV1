@@ -8,6 +8,8 @@ Heavy imports (torch, transformers, faster_whisper) happen INSIDE the loaders,
 so importing this module is always cheap. In stub mode boot only pays for the
 voice model — the text models are skipped entirely.
 """
+import os
+
 from app.config import Config
 
 
@@ -122,11 +124,20 @@ class ModelRegistry:
         self.summarizer_llm.eval()
         print("[ml] summarizer ready.")
 
+    def bench_shares_app_weights(self, key):
+        """True when this comparison model IS the app's chatbot (same weights
+        on disk). The bench reuses the loaded chatbot for it instead of putting
+        a second copy of the same file in VRAM."""
+        path = Config.BENCH_MODEL_PATHS.get(key)
+        return bool(path) and (os.path.normcase(path)
+                               == os.path.normcase(Config.CHAT_MODEL_PATH))
+
     def load_bench_model(self, key):
-        """LAZY loader for an extra Test Chat comparison LLM (llama32/qwen3).
-        Nothing loads at boot — only the first '3 Models' bench run pays the
-        cost. Returns True when ready; a failed load (missing weights, OOM,
-        stub mode) returns False and the bench shows a per-variant error."""
+        """LAZY loader for one Test Chat comparison LLM. Nothing loads at boot,
+        and the bench frees each model after using it — the study's three chat
+        models do not fit in VRAM together alongside the app's own chatbot.
+        Returns True when ready; a failed load (missing weights, OOM, stub
+        mode) returns False and the bench shows a per-variant error."""
         if getattr(self, f"bench_{key}_ready", False):
             return True
         if not self.real_mode:
@@ -151,8 +162,13 @@ class ModelRegistry:
             print(f"[ml] bench model '{key}' ready.")
             return True
         except Exception as e:
-            print(f"[ml] bench model '{key}' unavailable. ({type(e).__name__}: {e})")
-            setattr(self, f"bench_{key}_ready", False)
+            # Out of VRAM is the expected failure on a small card (the chatbot
+            # is already resident) — say so plainly instead of a raw CUDA dump.
+            note = ("not enough GPU memory alongside the app's chatbot"
+                    if "out of memory" in str(e).lower()
+                    else f"{type(e).__name__}: {e}")
+            print(f"[ml] bench model '{key}' unavailable. ({note})")
+            self.free_bench_model(key)      # drop any partial allocation
             return False
 
     def load_voice(self):
@@ -184,19 +200,8 @@ class ModelRegistry:
         return self.voice_ready
 
     # ------------------------------------------------------------------ cleanup
-    def free_all(self):
-        print("[ml] freeing models...")
-        for key in Config.BENCH_MODEL_PATHS:
-            setattr(self, f"bench_{key}_tok", None)
-            setattr(self, f"bench_{key}_llm", None)
-            setattr(self, f"bench_{key}_ready", False)
-        self.chatbot_tok = self.chatbot_llm = None
-        self.clf_tok = self.clf_model = None
-        self.summarizer_tok = self.summarizer_llm = None
-        self.voice_model = None
-        self.chatbot_ready = self.classifier_ready = False
-        self.summarizer_ready = self.voice_ready = False
-        self.voice_attempted = False
+    def _reclaim(self):
+        """Return freed weights to the allocator (and the GPU)."""
         try:
             import gc
             import torch
@@ -205,6 +210,35 @@ class ModelRegistry:
                 torch.cuda.empty_cache()
         except Exception:
             pass
+
+    def free_bench_model(self, key):
+        """Drop ONE comparison model. Called between variants of a '3 Models'
+        run so peak VRAM is chatbot + one extra, not chatbot + all extras."""
+        setattr(self, f"bench_{key}_tok", None)
+        setattr(self, f"bench_{key}_llm", None)
+        setattr(self, f"bench_{key}_ready", False)
+        self._reclaim()
+
+    def free_bench_models(self):
+        """Drop every comparison model. They're needed only for the seconds a
+        bench run takes; holding them starves the chat service."""
+        for key in Config.BENCH_MODEL_PATHS:
+            setattr(self, f"bench_{key}_tok", None)
+            setattr(self, f"bench_{key}_llm", None)
+            setattr(self, f"bench_{key}_ready", False)
+        self._reclaim()
+
+    def free_all(self):
+        print("[ml] freeing models...")
+        self.free_bench_models()
+        self.chatbot_tok = self.chatbot_llm = None
+        self.clf_tok = self.clf_model = None
+        self.summarizer_tok = self.summarizer_llm = None
+        self.voice_model = None
+        self.chatbot_ready = self.classifier_ready = False
+        self.summarizer_ready = self.voice_ready = False
+        self.voice_attempted = False
+        self._reclaim()
 
 
 registry = ModelRegistry()

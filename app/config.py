@@ -98,10 +98,14 @@ class Config:
     CHATBOT_DTYPE = _env("CHATBOT_DTYPE", "auto")
     SUMMARIZER_DEVICE = _env("SUMMARIZER_DEVICE", "cpu")
 
-    # Extra comparison models for the staff Test Chat bench ("3 Models" mode).
-    # LAZY-loaded on first use — never at boot. Defaults point at the
-    # fine-tuning study's merged weights alongside the app-served Gemma.
+    # The fine-tuning study's three models, for the staff Test Chat bench
+    # ("3 Models" mode). All three are listed regardless of which one the app
+    # serves — bench.py skips whichever matches CHAT_MODEL_PATH and reuses the
+    # already-loaded chatbot for it. LAZY-loaded per run, never at boot, and
+    # freed afterwards (they don't all fit in VRAM alongside the chatbot).
     BENCH_MODEL_PATHS = {
+        "gemma2": _abspath(_env("BENCH_GEMMA2_PATH",
+                                "models/chat_models/mentalchat16k/gemma2_merged")),
         "llama32": _abspath(_env("BENCH_LLAMA32_PATH",
                                  "models/chat_models/mentalchat16k/llama32_merged")),
         "qwen3": _abspath(_env("BENCH_QWEN3_PATH",
