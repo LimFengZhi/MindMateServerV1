@@ -1,0 +1,21 @@
+# Secrets — NEVER in the image; provided at runtime via env_file.
+.env
+
+# Weights & data: downloaded into the models volume by the entrypoint.
+models/
+data/
+
+# Local-only research pipeline and its outputs.
+fine_tuning_chatbot/
+
+# Dev machinery.
+.venv/
+.git/
+.claude/
+__pycache__/
+**/__pycache__/
+tests/
+*.md
+.dockerignore
+Dockerfile
+docker-compose.yml

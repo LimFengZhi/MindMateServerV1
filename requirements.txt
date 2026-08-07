@@ -33,6 +33,9 @@ langchain-core>=1.0
 transformers>=4.44
 accelerate>=0.30
 peft>=0.11
+# ONNX classifier support (the deployed int8 RoBERTa export; registry
+# auto-detects a *.onnx file in CLASSIFIER_PATH and loads it through optimum)
+optimum[onnxruntime]>=1.20
 
 # --- Voice (speech-to-text) ---
 faster-whisper>=1.0

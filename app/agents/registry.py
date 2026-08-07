@@ -104,13 +104,30 @@ class ModelRegistry:
         print("[ml] chatbot ready on", self.chatbot_llm.device)
 
     def _load_classifier(self):
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-        print("[ml] loading emotion classifier...")
+        """Loads either format the study produced: the safetensors RoBERTa, or
+        the ONNX int8 export (Fz0212/mh-roberta-classifier-onnx-int8 — 125 MB,
+        CPU-fast, the deployment artifact). Detection is by file, so switching
+        is just pointing CLASSIFIER_PATH at the other folder. ORTModel exposes
+        the same tokenizer + `model(**enc).logits` API, so chains._diagnose_real
+        works unchanged with both."""
+        import glob
+        import os
+
+        from transformers import AutoTokenizer
+        onnx = glob.glob(os.path.join(Config.CLASSIFIER_PATH, "*.onnx"))
         self.clf_tok = AutoTokenizer.from_pretrained(Config.CLASSIFIER_PATH)
-        self.clf_model = AutoModelForSequenceClassification.from_pretrained(
-            Config.CLASSIFIER_PATH
-        )
-        self.clf_model.eval()
+        if onnx:
+            from optimum.onnxruntime import ORTModelForSequenceClassification
+            print(f"[ml] loading emotion classifier (ONNX: "
+                  f"{os.path.basename(onnx[0])})...")
+            self.clf_model = ORTModelForSequenceClassification.from_pretrained(
+                Config.CLASSIFIER_PATH, file_name=os.path.basename(onnx[0]))
+        else:
+            from transformers import AutoModelForSequenceClassification
+            print("[ml] loading emotion classifier...")
+            self.clf_model = AutoModelForSequenceClassification.from_pretrained(
+                Config.CLASSIFIER_PATH)
+            self.clf_model.eval()          # ORT models have no eval()
         print("[ml] classifier ready.")
 
     def _load_summarizer(self):

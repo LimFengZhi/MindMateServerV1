@@ -74,6 +74,20 @@ cooldown (`app/email_utils.py`), and the session-analysis report cache
 multi-GB copy of the model weights. Scaling out means moving all of that to
 shared storage first — not just adding workers.
 
+**Docker (GPU host).** The repo ships a container setup that follows all of the
+above (one gunicorn worker, models in a volume, secrets never in the image):
+```bash
+# on a host with an NVIDIA driver + nvidia-container-toolkit
+cp .env.example .env        # fill in the real secrets
+docker compose up --build
+```
+First boot downloads the weights from Hugging Face (`Fz0212/…`, ~9.5 GB — the
+three study chat models + the **int8 ONNX classifier**, which the app detects by
+the `.onnx` file and loads through `optimum-onnxruntime`) into the `models`
+volume via `scripts/download_models.py`; later boots are instant. The same
+script works outside Docker too — a fresh clone can fetch its weights with
+`python scripts/download_models.py`. Health probe: `http://<host>:5000/health`.
+
 **Optional — crisis email.** Set `crisis_email.enabled: true` in `config.yaml`
 and fill in the SMTP values in `.env`, and every crisis escalation emails the
 counselling information to the user's registered address (at most one email

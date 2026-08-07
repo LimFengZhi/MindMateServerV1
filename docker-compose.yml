@@ -1,0 +1,39 @@
+# MindMate GPU deployment.
+#
+#   1. put the real secrets in .env next to this file (never in the image)
+#   2. docker compose up --build
+#   3. first boot downloads ~9.5 GB of weights into the `models` volume,
+#      then serves on http://<host>:5000
+#
+# Host requirements: NVIDIA driver + nvidia-container-toolkit.
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env                     # Supabase keys, SECRET_KEY, SMTP, GLM key...
+    environment:
+      # container-specific overrides of whatever .env carries
+      CLASSIFIER_PATH: models/classifier_models/roberta_onnx_int8
+      FLASK_DEBUG: "0"
+    volumes:
+      - models:/app/models       # weights survive rebuilds and restarts
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 300s          # first boot = 9.5 GB download + model load
+      retries: 3
+
+volumes:
+  models:
