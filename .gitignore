@@ -19,3 +19,4 @@ checkpoints/
 .ipynb_checkpoints/
 .vscode/
 test_input.json
+docker/docker-compose.web.yml

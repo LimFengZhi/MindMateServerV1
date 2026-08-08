@@ -1,0 +1,54 @@
+# MindMate — WEB-HOSTING image (CPU-only Flask tier).
+#
+# Serves the site/API; all model work (chat, bench, report) is relayed to the
+# RunPod serverless worker via INFERENCING_CLIENT=runpod. No torch, no GPU,
+# no chat-model weights — the only model kept local is faster-whisper "small"
+# (CPU voice transcription: it has no stub and deliberately stays in Flask).
+#
+# Build & run:
+#   docker build -f docker/Dockerfile.web -t <dockerhub-user>/mindmate-web:v1 .
+#   docker run --env-file .env -p 5000:5000 <dockerhub-user>/mindmate-web:v1
+#
+# Runtime env (never baked): SUPABASE_URL, SUPABASE_SECRET_KEY,
+# SUPABASE_ANON_KEY, SECRET_KEY, SITE_URL (the public URL),
+# RUNPOD_ENDPOINT_ID, RUNPOD_API_KEY. SMTP_* belongs on the RunPod endpoint
+# (the crisis email sends from the worker's persist node in runpod mode).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# App deps only — torch is NOT in requirements.txt (it's a separate install
+# in the GPU images), and stub mode never reaches the heavy lazy imports.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Bake whisper "small" into the image's HF cache so boot doesn't download.
+# Retried INSIDE the layer (partial files resume); the final run is the gate.
+ENV HF_HOME=/app/models/.hf_cache \
+    HF_HUB_DISABLE_XET=1
+RUN for i in 1 2 3 4 5; do \
+      python -c "from huggingface_hub import snapshot_download; \
+                 snapshot_download('Systran/faster-whisper-small')" && break; \
+      echo "[bake] attempt $i failed - retrying in 15s..."; sleep 15; \
+    done \
+ && python -c "from huggingface_hub import snapshot_download; \
+               snapshot_download('Systran/faster-whisper-small')"
+
+# The app. .dockerignore keeps models/, data/, the study, and .env out.
+COPY app ./app
+COPY scripts ./scripts
+COPY config.yaml ./
+
+# Non-secret defaults: stub agents locally, RunPod for inference.
+ENV AI_MODE=stub \
+    INFERENCING_CLIENT=runpod \
+    WHISPER_MODEL=small \
+    WHISPER_DEVICE=cpu \
+    WHISPER_COMPUTE=int8 \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 5000
+
+COPY docker/entrypoint-web.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
