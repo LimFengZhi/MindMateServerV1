@@ -57,13 +57,27 @@ COPY scripts/download_models.py ./scripts/download_models.py
 # ALL THREE study chat models (qwen3 serves the app; gemma2 + llama32 are the
 # Test Chat bench's 'models3' extras, lazy-loaded one at a time per run) +
 # the int8 ONNX classifier -> /app/models/...
-RUN python scripts/download_models.py
-# Summarizer + faster-whisper "small" -> the HF cache (HF_HOME above).
-RUN python - <<'EOF'
-from huggingface_hub import snapshot_download
-snapshot_download("Qwen/Qwen2.5-1.5B-Instruct")
-snapshot_download("Systran/faster-whisper-small")
-EOF
+# Retried INSIDE one RUN: files that made it stay on the layer and are
+# skipped/resumed on the next attempt, so a dropped connection costs one file,
+# not the whole ~13 GB. The trailing --check is the hard gate: it exits
+# non-zero if anything is still missing, failing the build loudly.
+RUN for i in 1 2 3 4 5; do \
+      python scripts/download_models.py && break; \
+      echo "[bake] attempt $i failed - retrying in 15s..."; sleep 15; \
+    done \
+ && python scripts/download_models.py --check
+# Summarizer + faster-whisper "small" -> the HF cache (HF_HOME above), same
+# retry-in-layer treatment; the final run doubles as the gate (instant no-op
+# when everything is already cached).
+RUN for i in 1 2 3 4 5; do \
+      python -c "from huggingface_hub import snapshot_download; \
+                 snapshot_download('Qwen/Qwen2.5-1.5B-Instruct'); \
+                 snapshot_download('Systran/faster-whisper-small')" && break; \
+      echo "[bake] attempt $i failed - retrying in 15s..."; sleep 15; \
+    done \
+ && python -c "from huggingface_hub import snapshot_download; \
+               snapshot_download('Qwen/Qwen2.5-1.5B-Instruct'); \
+               snapshot_download('Systran/faster-whisper-small')"
 
 # ---- The app (small, changes often — keep last) -----------------------------
 # .dockerignore keeps data/, the study, and .env out of the context.
